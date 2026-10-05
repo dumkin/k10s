@@ -9,7 +9,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+#[cfg(any(unix, test))]
 const BEGIN: &str = "__K10S_ENV_BEGIN__";
+#[cfg(any(unix, test))]
 const END: &str = "__K10S_ENV_END__";
 
 /// Variables that describe the shell session itself and must not leak into child processes.
@@ -109,6 +111,7 @@ async fn import(_timeout: Duration) -> Result<HashMap<String, String>, String> {
     Ok(HashMap::new())
 }
 
+#[cfg(any(unix, test))]
 fn parse(out: &str) -> Option<HashMap<String, String>> {
     let start = out.find(BEGIN)? + BEGIN.len();
     let end = start + out[start..].find(END)?;
