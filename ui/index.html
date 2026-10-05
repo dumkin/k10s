@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>k10s</title>
+    <script>
+      // The theme before the first paint (no flash): the desktop app says which (crates/k10s-app/src/lib.rs); the
+      // browser mock keeps its stand-ins for the app's files in localStorage.
+      try {
+        var t = window.__K10S_THEME__ || (JSON.parse(localStorage.getItem("k10s:mock.files") || "{}").settings || {}).theme || "dark";
+        var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) {}
+      // What the desktop app keeps, asked for now: it arrives while the rest of the page loads (see TauriBackend).
+      if (window.__TAURI_INTERNALS__) window.__K10S_PREFS__ = window.__TAURI_INTERNALS__.invoke("prefs_load");
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

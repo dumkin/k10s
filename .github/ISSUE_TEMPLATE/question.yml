@@ -1,0 +1,11 @@
+name: Question
+description: How do I…? Why does k10s…? Anything that is neither a bug nor a feature request.
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Include your k10s version and OS if it may matter.
+    validations:
+      required: true

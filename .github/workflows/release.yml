@@ -1,0 +1,168 @@
+# Builds the installers of a version and puts them into a draft GitHub release with the update feed (latest.json).
+# Publishing the draft makes it the latest release: running apps find it, and the Publish workflow updates Homebrew
+# and winget. See docs/releasing.md.
+
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  prepare:
+    name: Check the version, open a draft release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+          UPDATER_PUBKEY: ${{ vars.UPDATER_PUBKEY }}
+          HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          version="${TAG#v}"
+          node scripts/version.mjs --check "$version"
+          if [ -z "$UPDATER_PUBKEY" ] || [ "$HAS_UPDATER_KEY" != "true" ]; then
+            echo "::error::The update signing key is not set up: the UPDATER_PUBKEY variable and the TAURI_SIGNING_PRIVATE_KEY secret (docs/releasing.md)."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # One draft for all the builds (each creating its own would race and leave duplicates). A re-run reuses it.
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          if [ -z "$id" ]; then
+            prerelease=()
+            case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac
+            gh release create "$TAG" --draft --verify-tag "${prerelease[@]}" --title "k10s $VERSION" --notes-file .github/release-notes.md
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple silicon only: Intel Macs aren't supported.
+          - name: macOS
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: Windows, x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # The oldest Ubuntu with WebKitGTK 4.1: its glibc (2.35) sets how old a distribution the packages run on.
+          # GitHub retires this image in April 2027; then build in an ubuntu:22.04 container instead.
+          - name: Linux, x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: Linux, Arm
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+
+      - name: Third-party notices
+        run: node scripts/third-party-notices.mjs
+
+      # Code signing is optional: each secret is passed on only when it is set, so that an unset one doesn't
+      # reach the bundler as an empty value.
+      - name: Signing credentials
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+                      AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID; do
+            if [ -n "${!name}" ]; then
+              { echo "$name<<__K10S_EOF__"; echo "${!name}"; echo "__K10S_EOF__"; } >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Windows signing tool
+        if: runner.os == 'Windows' && vars.WINDOWS_SIGN_COMMAND != ''
+        run: cargo install artifact-signing-cli --locked
+
+      - name: Release configuration
+        env:
+          UPDATER_PUBKEY: ${{ vars.UPDATER_PUBKEY }}
+          WINDOWS_SIGN_COMMAND: ${{ vars.WINDOWS_SIGN_COMMAND }}
+        run: node scripts/release-config.mjs
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # The Tauri CLI of ui/package.json, run from the repository root by its `tauri` script.
+          tauriScript: npm --prefix ui run tauri
+          releaseId: ${{ needs.prepare.outputs.release }}
+          # With the tag, latest.json points at this release's files rather than at "the latest release".
+          tagName: ${{ github.ref_name }}
+          releaseDraft: true
+          updaterJsonPreferNsis: true
+          retryAttempts: 1
+          args: --target ${{ matrix.target }} --config release.conf.json
+
+  feed:
+    name: Check the update feed
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Every platform in latest.json, with direct download links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.prepare.outputs.release }}
+          TAG: ${{ github.ref_name }}
+        run: node scripts/update-feed.mjs

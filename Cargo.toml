@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = ["crates/k10s-core", "crates/k10s-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "AGPL-3.0-only"
+authors = ["Danil Dumkin"]
+repository = "https://github.com/dumkin/k10s"
+homepage = "https://github.com/dumkin/k10s"
+publish = false
+
+[workspace.dependencies]
+k10s-core = { path = "crates/k10s-core" }
+
+kube = { version = "4.2", default-features = false, features = [
+    "client", "rustls-tls", "ring", "runtime", "ws", "gzip", "oidc", "http-proxy", "socks5",
+] }
+k8s-openapi = { version = "0.28", features = ["latest"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "net"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+parking_lot = "0.12"
+jiff = "0.2"
+dirs = "7"
+
+tauri = { version = "2.12", features = [] }
+tauri-build = { version = "2.7", features = [] }
+tauri-plugin-window-state = "2.5"
+tauri-plugin-updater = "2.13"
+
+# Debug builds: optimize dependencies (serde, tokio, rustls…) so `tauri dev` stays fast,
+# while our own crates compile quickly with debug info.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true

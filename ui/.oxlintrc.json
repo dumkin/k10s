@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": { "correctness": "error" },
+  "env": { "browser": true, "es2024": true },
+  "ignorePatterns": ["dist/**"],
+  "rules": {
+    // Solid assigns the variables of `ref={el}` itself.
+    "no-unassigned-vars": "off",
+    // `a && b()` and `(a(), b())` are written on purpose.
+    "no-unused-expressions": "off",
+    // Log lines carry terminal escapes, and the code that strips them matches control characters.
+    "no-control-regex": "off",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "ignoreRestSiblings": true }],
+    "unicorn/no-new-array": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-useless-fallback-in-spread": "off"
+  },
+  "overrides": [
+    {
+      // Spelled-out arithmetic (`0 * SLOTS + i`) reads as the layout it checks.
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": { "oxc/erasing-op": "off" }
+    }
+  ]
+}

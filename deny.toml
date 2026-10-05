@@ -1,0 +1,50 @@
+# cargo-deny: what the Rust dependencies may be. CI runs `cargo deny check bans licenses sources`;
+# security advisories are checked daily by the Audit workflow.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "warn"
+ignore = [
+    # A proc macro that gtk 0.18 (the GTK 3 bindings under Tauri's Linux web view) runs at build time; nothing to move
+    # to until Tauri moves to GTK 4.
+    { id = "RUSTSEC-2024-0370", reason = "build-time proc macro of gtk 0.18, which Tauri's Linux web view needs" },
+]
+
+[licenses]
+version = 2
+# Everything here can be combined with k10s's AGPL-3.0 and shipped in its binaries. MPL-2.0 code stays under
+# MPL-2.0, file by file; THIRD-PARTY-NOTICES says where its source is.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# k10s's own crates (AGPL-3.0-only) are not published.
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

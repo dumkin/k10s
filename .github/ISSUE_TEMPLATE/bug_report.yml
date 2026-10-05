@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in k10s doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The quickest fixes come from reports that say what you did, what you expected and what happened instead.
+
+        **Don't paste kubeconfigs, tokens, Secret values, or cluster names and addresses you'd rather keep private.** k10s keeps object data out of its log, but read what you paste anyway.
+  - type: input
+    id: version
+    attributes:
+      label: k10s version
+      description: It's at the right end of the status bar.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple silicon)
+        - Windows, x64
+        - Linux, x64
+        - Linux, Arm
+    validations:
+      required: true
+  - type: input
+    id: os-details
+    attributes:
+      label: OS version, and how you installed k10s
+      placeholder: "macOS 15.6, Homebrew · Ubuntu 24.04 (GNOME), .deb · Windows 11, winget"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got. A screenshot or a screen recording helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest path to the problem, if you know it.
+      placeholder: |
+        1. Select three clusters
+        2. Open Deployments and press `=` on one
+        3. …
+  - type: textarea
+    id: clusters
+    attributes:
+      label: Your clusters
+      description: Kubernetes version and distribution (EKS, GKE, AKS, OpenShift, k3s…), how many clusters you had selected, how you authenticate (exec plugin, OIDC, token, client certificate), and whether your access is limited to some namespaces.
+      placeholder: "3 × EKS 1.33, aws exec plugin, access to two namespaces only"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Lines from the app log around the time of the problem. ⌘K (Ctrl+K) → "Open log folder" opens it:
+        macOS `~/Library/Logs/io.dumkin.k10s/`, Linux `~/.local/share/io.dumkin.k10s/logs/`, Windows `%LOCALAPPDATA%\io.dumkin.k10s\logs\`.
+      render: text

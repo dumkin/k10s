@@ -1,0 +1,38 @@
+# Known vulnerabilities in what k10s ships: daily, and whenever the dependencies change.
+
+name: Audit
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  push:
+    branches: [main]
+    paths: ["Cargo.lock", "ui/package-lock.json", "deny.toml"]
+  pull_request:
+    paths: ["Cargo.lock", "ui/package-lock.json", "deny.toml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+
+  npm:
+    name: npm advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # The packages bundled into the UI; the build tools never reach users.
+      - run: npm audit --omit=dev --audit-level=moderate
+        working-directory: ui

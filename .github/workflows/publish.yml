@@ -1,0 +1,82 @@
+# Once a release is published: the Homebrew cask and the winget manifest follow it. Each job runs only when its
+# token is set up (docs/releasing.md); pre-releases are skipped.
+
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, e.g. v0.2.0
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  homebrew:
+    name: Homebrew tap
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-24.04
+    env:
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Skip unless the tap is set up
+        if: env.TAP_TOKEN == ''
+        run: echo '::notice::HOMEBREW_TAP_TOKEN is not set, so the Homebrew tap was not updated.'
+      - uses: actions/checkout@v7
+        if: env.TAP_TOKEN != ''
+      - name: Write the cask
+        if: env.TAP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          mkdir -p dmg
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dmg --pattern "k10s_${version}_aarch64.dmg"
+          sha=$(sha256sum "dmg/k10s_${version}_aarch64.dmg" | cut -d' ' -f1)
+          sed -e "s|__REPO__|$GITHUB_REPOSITORY|g" -e "s|__VERSION__|$version|g" -e "s|__SHA256__|$sha|g" \
+            -e '/^# /d' packaging/homebrew/k10s.rb > k10s.rb
+          cat k10s.rb
+      - uses: actions/checkout@v7
+        if: env.TAP_TOKEN != ''
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Push it to the tap
+        if: env.TAP_TOKEN != ''
+        run: |
+          mkdir -p tap/Casks
+          cp k10s.rb tap/Casks/k10s.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/k10s.rb
+          git diff --cached --quiet || git commit -m "k10s ${TAG#v}"
+          git push
+
+  winget:
+    name: winget
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: windows-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Skip unless winget is set up
+        if: env.WINGET_TOKEN == ''
+        run: echo '::notice::WINGET_TOKEN is not set, so no winget pull request was opened.'
+      # Opens a pull request to microsoft/winget-pkgs from the token owner's fork. The package must already be
+      # there: the first version is submitted by hand (docs/releasing.md).
+      - uses: vedantmgoyal9/winget-releaser@v2
+        if: env.WINGET_TOKEN != ''
+        with:
+          identifier: Dumkin.k10s
+          release-tag: ${{ env.TAG }}
+          installers-regex: '_x64-setup\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}

@@ -1,0 +1,3 @@
+# Wide lines: a statement stays on one line wherever it fits.
+max_width = 160
+use_small_heuristics = "Max"

@@ -1,0 +1,42 @@
+[package]
+name = "k10s-core"
+description = "k10s engine: kubeconfig, multi-cluster connections, shared watch feeds, row rendering, logs, actions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[dependencies]
+kube.workspace = true
+k8s-openapi.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+jiff.workspace = true
+# Already in the tree via kube: the stable per-cluster client (`cluster::Endpoint`) is a tower service.
+tower = { version = "0.5", features = ["util"] }
+http = "1"
+# Already in the tree via kube: exec plugins are run by k10s (`exec.rs`), their output read the way kube reads
+# it (JSON or YAML), a client certificate they return handed to kube as kubeconfig data (base64).
+serde-saphyr = "0.0.29"
+base64 = "0.22"
+# Helm keeps its releases gzipped (already in the tree via kube's gzip support).
+flate2 = "1"
+# Differences between Helm revisions (values, manifests), as unified diffs.
+similar = "3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tower = { version = "0.5", features = ["util"] }
+http = "1"
+http-body = "1"
+bytes = "1"
+secrecy = "0.10"
