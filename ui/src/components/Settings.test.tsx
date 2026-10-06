@@ -103,6 +103,12 @@ describe("settings window", () => {
     expect(focusable.at(-1)?.getAttribute("aria-label")).toBe("Close");
   });
 
+  it("opens each page of the project from About", () => {
+    setSettingsOpen("about");
+    for (const label of ["Source code", "Releases", "Report a problem"]) row(label).querySelector("button")!.click();
+    expect(engine.openProjectPage.mock.calls).toEqual([["home"], ["releases"], ["issues"]]);
+  });
+
   it("shows where the files are and opens them; the settings file as it is, or why it can't be read", async () => {
     useFiles(
       { settings: { theme: "light", logs: { tail: 500 } }, state: {}, settingsError: "expected value at line 4 column 3", settingsPath: "/Users/me/Library/Application Support/io.dumkin.k10s/settings.json", statePath: "/Users/me/Library/Application Support/io.dumkin.k10s/state.json" },

@@ -511,16 +511,22 @@ pub enum ProjectPage {
     Releases,
 }
 
-/// Opens a page of the project in the browser (the repository its bundle names as its homepage).
+/// The project's repository: the crate's `homepage` in Cargo.toml. Not `bundle.homepage` of tauri.conf.json:
+/// `generate_context!` leaves that out of the config the app gets at run time (it is always `None` there).
+const HOMEPAGE: &str = env!("CARGO_PKG_HOMEPAGE");
+
+/// Opens a page of the project in the browser.
 #[tauri::command]
-pub async fn open_project_page(app: AppHandle, page: ProjectPage) -> Result<()> {
-    let home = app.config().bundle.homepage.clone().ok_or_else(|| k10s_core::Error::other("the build names no homepage"))?;
-    let url = match page {
-        ProjectPage::Home => home,
-        ProjectPage::Issues => format!("{home}/issues"),
-        ProjectPage::Releases => format!("{home}/releases"),
-    };
-    open_with_system(&url)
+pub async fn open_project_page(page: ProjectPage) -> Result<()> {
+    open_with_system(&project_page_url(page))
+}
+
+fn project_page_url(page: ProjectPage) -> String {
+    match page {
+        ProjectPage::Home => HOMEPAGE.to_owned(),
+        ProjectPage::Issues => format!("{HOMEPAGE}/issues"),
+        ProjectPage::Releases => format!("{HOMEPAGE}/releases"),
+    }
 }
 
 /// Opens the log folder in Finder / Explorer / the file manager.
@@ -601,6 +607,17 @@ pub(crate) fn reveal_with_system(path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_pages_are_pages_of_the_repository() {
+        assert!(HOMEPAGE.starts_with("https://github.com/"), "Cargo.toml names no GitHub homepage: {HOMEPAGE:?}");
+        // Named as the web view names them (`openProjectPage` in ui/src/lib/backend).
+        let url = |page: &str| project_page_url(serde_json::from_value(serde_json::json!(page)).unwrap());
+        assert_eq!(url("home"), HOMEPAGE);
+        assert_eq!(url("issues"), format!("{HOMEPAGE}/issues"));
+        assert_eq!(url("releases"), format!("{HOMEPAGE}/releases"));
+        assert!(serde_json::from_value::<ProjectPage>(serde_json::json!("https://example.com")).is_err());
+    }
 
     #[test]
     fn suggested_file_names_stay_in_the_folder_picked() {
