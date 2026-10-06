@@ -50,10 +50,15 @@ jobs:
         run: |
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
           if [ -z "$id" ]; then
-            prerelease=()
-            case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac
-            gh release create "$TAG" --draft --verify-tag "${prerelease[@]}" --title "k10s $VERSION" --notes-file .github/release-notes.md
-            id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+            prerelease=false
+            case "$VERSION" in *-*) prerelease=true ;; esac
+            # The id comes from the response: the list of releases may not show a just-created draft yet.
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -F draft=true -F prerelease="$prerelease" \
+              -f name="k10s $VERSION" -F body=@.github/release-notes.md --jq .id)
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::No release id for $TAG."
+            exit 1
           fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
