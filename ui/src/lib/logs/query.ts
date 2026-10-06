@@ -3,10 +3,10 @@ import { LEVEL_NAME, levelNamed } from "./parse";
 
 // The logs' filter language. Words must all be there (in any order, any case); "a phrase" keeps its words together;
 // !word leaves lines out; /a.?regex/ is a regular expression; key:value looks into a structured line's field
-// (contains), key=value is equality, key>n, key>=n, key<n, key<=n compare numbers, a,b,c lists alternatives, and *
-// is a wildcard; key: alone is a field the line has. `level`, `pod`, `container`, `cluster` and `namespace` work on
-// every line. A line without the field (a plain one) is matched by the term's text instead: a URL (http://…) or
-// "error:" finds what it says.
+// (contains), key=value is equality, key>n, key>=n, key<n, key<=n compare numbers, a,b,c lists alternatives (quoted
+// ones too: "a b",c), and * is a wildcard; key: alone is a field the line has. `level`, `pod`, `container`, `cluster`
+// and `namespace` work on every line. A line without the field (a plain one) is matched by the term's text instead: a
+// URL (http://…) or "error:" finds what it says.
 // With the regex option the whole input is one regular expression (!… inverts it).
 
 export interface QueryOptions {
@@ -102,6 +102,25 @@ export function tokenize(input: string): Token[] {
 }
 
 const unquote = (s: string) => (s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).replace(/\\(.)/g, "$1") : s);
+
+/** A term's values as written (a quoted one with its quotes): `a,"b, c"` is `a` and `"b, c"`. */
+function itemsOf(rest: string): string[] {
+  const out: string[] = [];
+  let from = 0;
+  let quoted = false;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if (c === "\\" && quoted) i++;
+    else if (c === '"') quoted = !quoted;
+    else if (c === "," && !quoted) {
+      out.push(rest.slice(from, i));
+      from = i + 1;
+    }
+  }
+  out.push(rest.slice(from));
+  return out.filter(Boolean);
+}
+
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A value with `*` as a regular expression (anchored for equality); null without one. */
@@ -160,8 +179,7 @@ export function parseQuery(input: string, opts: QueryOptions = {}): Query {
     const f = FIELD.exec(raw);
     if (f && !(f[2] === ":" && f[3].startsWith("//"))) {
       const [, key, op, rest] = f;
-      const value = unquote(rest);
-      const values = rest.startsWith('"') ? [value] : value.split(",").filter(Boolean);
+      const values = itemsOf(rest).map(unquote);
       if (values.length) {
         const anchored = op === "=" || op === "!=";
         q.terms.push({ kind: "field", key, op: op as Op, values, globs: values.map((v) => globOf(v, anchored, !!opts.matchCase)), raw, not });
@@ -343,15 +361,44 @@ export function fieldTerm(key: string, value: FieldValue, not = false): string {
   return `${not ? "!" : ""}${key}=${valueTerm(value === null ? "null" : String(value))}`;
 }
 
-/** Adds a term to the input, replacing one for the same key and operator (and sense) if there is one. */
+/** A `key=value` term (`!`: left out) of the input: its values as written and as meant. */
+function equalityOf(raw: string) {
+  const not = raw.length > 1 && raw.startsWith("!");
+  const f = FIELD.exec(not ? raw.slice(1) : raw);
+  if (!f || f[2] !== "=") return null;
+  const items = itemsOf(f[3]);
+  return { not, key: f[1], head: raw.slice(0, raw.length - f[3].length), items, values: items.map(unquote) };
+}
+
+/**
+ * Adds a term to the input. A value of a field the input has a term for, the same way (wanted, or left out), is one
+ * more of its values (`key=a` and `key=b`: `key=a,b`, either); the same value the other way round goes (`!key=a` for
+ * `key=a`).
+ */
 export function withTerm(input: string, term: string): string {
   const trimmed = input.trim();
   if (!trimmed) return term;
   const tokens = tokenize(trimmed).map((t) => t.raw);
   if (tokens.includes(term)) return trimmed;
-  const head = /^(!?[A-Za-z_@][\w.@-]*)(>=|<=|!=|:|=|>|<)/.exec(term)?.[0];
-  const kept = head ? tokens.filter((t) => !t.startsWith(head)) : tokens;
-  return [...kept, term].join(" ");
+  const add = equalityOf(term);
+  if (!add) return [...tokens, term].join(" ");
+  const out: string[] = [];
+  let joined = false;
+  for (const raw of tokens) {
+    const t = equalityOf(raw);
+    if (!t || t.key !== add.key) out.push(raw);
+    else if (t.not !== add.not) {
+      const items = t.items.filter((_, i) => !add.values.includes(t.values[i]));
+      if (items.length === t.items.length) out.push(raw);
+      else if (items.length) out.push(t.head + items.join(","));
+    } else if (!joined) {
+      const more = add.items.filter((_, i) => !t.values.includes(add.values[i]));
+      out.push(more.length ? `${raw},${more.join(",")}` : raw);
+      joined = true;
+    } else out.push(raw);
+  }
+  if (!joined) out.push(term);
+  return out.join(" ");
 }
 
 /** Plain words for the query (a tooltip): `contains "a" · not "b" · status ≥ 500`. */

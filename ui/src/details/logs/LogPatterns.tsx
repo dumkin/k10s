@@ -3,7 +3,7 @@ import { Icon } from "../../components/Icon";
 import { count } from "../../lib/format";
 import { gapOf } from "../../lib/logs/format";
 import { Level, LEVEL_NAME } from "../../lib/logs/parse";
-import { patternParts } from "../../lib/logs/patterns";
+import { patternParts, type PatternIds } from "../../lib/logs/patterns";
 import { clusterColor, shortName } from "../../state/clusters";
 import type { Line } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
@@ -15,11 +15,23 @@ const PER_PASS = 8_000;
 const SPARK = 28;
 /** Patterns listed (the rest are counted). */
 const SHOWN = 300;
+/** Lines that keep coming are counted at most every `EVERY` ms. */
+const EVERY = 400;
+/** A row pressed keeps the list still until it is released, at most this long (a release may never come). */
+const HOLD = 2_000;
 
+/**
+ * A pattern listed: the same object for as long as it is listed, so its row stays the same elements (a click or a
+ * hover lands on it). What it counts is the latest pass's (`Counts`).
+ */
 interface Row {
   id: number;
   pattern: string;
   level: Level;
+}
+
+/** A pattern's lines, as a pass counted them. */
+interface Counts {
   count: number;
   first: number;
   last: number;
@@ -38,26 +50,75 @@ type Sort = "count" | "level" | "recent";
 export function LogPatterns(props: { ctx: LogCtx }) {
   const c = props.ctx;
   const [sort, setSort] = createSignal<Sort>("count");
+  // The lines are counted again at once when they are seen another way (a filter, another stream: the buffer's view is
+  // another array); as lines come (the same array, updated in place) at most every EVERY ms — not while paused (the
+  // patterns stay as they were), nor while a row is pressed: a row moved between the press and the release (taken out
+  // and put back) loses the click.
   const [tick, setTick] = createSignal(0);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastRun = 0;
+  let heldUntil = 0;
+  const run = () => {
+    timer = undefined;
+    const held = heldUntil - performance.now();
+    if (held > 0) timer = setTimeout(run, held);
+    else setTick((t) => t + 1);
+  };
   const schedule = (ms: number) => {
     if (timer) return;
-    timer = setTimeout(() => {
-      timer = undefined;
-      lastRun = performance.now();
-      setTick((t) => t + 1);
-    }, ms);
+    timer = setTimeout(run, ms);
   };
-  createEffect(on([c.patternsBase, c.levels, c.range], () => schedule(Math.max(0, lastRun + 400 - performance.now()))));
-  onCleanup(() => clearTimeout(timer));
+  const view = createMemo(() => c.patternsBase());
+  createEffect(
+    on(c.patternsBase, (lines, before) => {
+      if (lines === before && c.pausedAt() === null) schedule(Math.max(0, lastRun + EVERY - performance.now()));
+    }),
+  );
+  const hold = (e: PointerEvent) => {
+    if (e.button === 0) heldUntil = performance.now() + HOLD;
+  };
+  // Released: after the click that follows (the same event), what waited is counted.
+  const release = () => {
+    if (!heldUntil) return;
+    setTimeout(() => {
+      if (!heldUntil) return;
+      heldUntil = 0;
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = undefined;
+      schedule(Math.max(0, lastRun + EVERY - performance.now()));
+    });
+  };
+  window.addEventListener("pointerup", release);
+  window.addEventListener("pointercancel", release);
+  // "5s ago" as time goes, whether lines come or not.
+  const [now, setNow] = createSignal(Date.now());
+  const clock = setInterval(() => setNow(Date.now()), 1000);
+  onCleanup(() => {
+    clearTimeout(timer);
+    timer = undefined;
+    heldUntil = 0;
+    clearInterval(clock);
+    window.removeEventListener("pointerup", release);
+    window.removeEventListener("pointercancel", release);
+  });
 
+  /** The rows by pattern id, of the ids they were made with (another stream numbers its patterns anew). */
+  let rowsOf = new Map<number, Row>();
+  let rowsIds: PatternIds | undefined;
   const data = createMemo(() => {
     tick();
-    const lines = c.patternsBase();
+    const lines = view();
     const levels = c.levels();
     const range = c.range();
-    const rows = new Map<number, Row>();
+    lastRun = performance.now();
+    const ids = c.patternIds();
+    if (ids !== rowsIds) {
+      rowsIds = ids;
+      rowsOf = new Map();
+    }
+    const rows: Row[] = [];
+    const counts = new Map<number, Counts>();
     let budget = PER_PASS;
     let pending = 0;
     let total = 0;
@@ -80,30 +141,40 @@ export function LogPatterns(props: { ctx: LogCtx }) {
         id = c.patternOf(l);
       }
       total++;
-      let r = rows.get(id);
-      if (!r) {
-        const p = c.patternIds().patterns[id];
-        r = { id, pattern: p.slice(p.indexOf("|") + 1), level: l.lvl, count: 0, first: l.key, last: l.key, clusters: new Map(), spark: new Uint32Array(SPARK), sample: l };
-        rows.set(id, r);
+      let n = counts.get(id);
+      if (!n) {
+        let r = rowsOf.get(id);
+        if (!r) {
+          const p = ids.patterns[id];
+          r = { id, pattern: p.slice(p.indexOf("|") + 1), level: l.lvl };
+          rowsOf.set(id, r);
+        }
+        rows.push(r);
+        n = { count: 0, first: l.key, last: l.key, clusters: new Map(), spark: new Uint32Array(SPARK), sample: l };
+        counts.set(id, n);
       }
-      r.count++;
-      r.last = l.key;
-      r.sample = l;
+      n.count++;
+      n.last = l.key;
+      n.sample = l;
       const cluster = c.sources().byId[l.i]?.cluster ?? "";
-      r.clusters.set(cluster, (r.clusters.get(cluster) ?? 0) + 1);
-      r.spark[Math.min(SPARK - 1, Math.floor(((l.key - first) / span) * SPARK))]++;
+      n.clusters.set(cluster, (n.clusters.get(cluster) ?? 0) + 1);
+      n.spark[Math.min(SPARK - 1, Math.floor(((l.key - first) / span) * SPARK))]++;
     }
     // Patterns of the lines not worked out yet: in the next pass, soon.
     if (pending) schedule(16);
-    return { rows: [...rows.values()], total, pending, first, last };
+    return { rows, counts, total, pending, first, last };
   });
   const sorted = createMemo(() => {
-    const rows = [...data().rows];
+    const { rows, counts } = data();
+    const n = (r: Row) => counts.get(r.id)!;
     const s = sort();
-    rows.sort(s === "level" ? (a, b) => b.level - a.level || b.count - a.count : s === "recent" ? (a, b) => b.last - a.last : (a, b) => b.count - a.count);
-    return rows.slice(0, SHOWN);
+    return [...rows].sort(s === "level" ? (a, b) => b.level - a.level || n(b).count - n(a).count : s === "recent" ? (a, b) => n(b).last - n(a).last : (a, b) => n(b).count - n(a).count).slice(0, SHOWN);
   });
-  const max = createMemo(() => data().rows.reduce((m, r) => Math.max(m, r.count), 1));
+  const max = createMemo(() => {
+    let m = 1;
+    for (const n of data().counts.values()) m = Math.max(m, n.count);
+    return m;
+  });
   const clusters = createMemo(() => (data(), [...new Set(c.sources().byId.map((s) => s.cluster))].sort()), [], { equals: (a, b) => a.join() === b.join() });
 
   const show = (id: number) => {
@@ -142,26 +213,29 @@ export function LogPatterns(props: { ctx: LogCtx }) {
           <option value="recent">Latest first</option>
         </select>
       </div>
-      <div class="lpat-list">
+      <div class="lpat-list" onPointerDown={hold}>
         <For each={sorted()} fallback={<div class="logv-empty faint">{c.buffer().lines.length ? "No lines to group" : c.summary().text}</div>}>
           {(r) => {
+            // The latest pass's numbers (a row on its way out keeps its last ones).
+            const n = createMemo<Counts>((prev) => data().counts.get(r.id) ?? prev!);
             const hidden = () => c.hiddenPatterns().has(r.id);
             const only = () => c.only().has(r.id);
             const spread = () => {
               const all = clusters();
               if (all.length < 2) return null;
-              const present = all.filter((cl) => r.clusters.get(cl));
+              const present = all.filter((cl) => n().clusters.get(cl));
               return { present, all, note: present.length === 1 ? `only ${shortName(present[0])}` : present.length === all.length ? `all ${all.length}` : present.map(shortName).join(", ") };
             };
             const spark = () => {
-              const top = Math.max(1, ...r.spark);
-              return Array.from(r.spark, (n, k) => `${k === 0 ? "M" : "L"}${(k * 64) / (SPARK - 1)},${16 - (n / top) * 14}`).join(" ");
+              const points = n().spark;
+              const top = Math.max(1, ...points);
+              return Array.from(points, (v, k) => `${k === 0 ? "M" : "L"}${(k * 64) / (SPARK - 1)},${16 - (v / top) * 14}`).join(" ");
             };
             return (
-              <div class="lpat-row" classList={{ hidden: hidden(), only: only() }} title={`Latest: ${r.sample.text.replace(/\x1b\[[\d;]*m/g, "").slice(0, 400)}`}>
+              <div class="lpat-row" classList={{ hidden: hidden(), only: only() }} title={`Latest: ${n().sample.text.replace(/\x1b\[[\d;]*m/g, "").slice(0, 400)}`}>
                 <span class="lpat-count">
-                  <span class="lpat-bar" style={{ width: `${(r.count / max()) * 100}%`, background: LEVEL_COLORS[r.level] }} />
-                  <b>{count(r.count)}</b>
+                  <span class="lpat-bar" style={{ width: `${(n().count / max()) * 100}%`, background: LEVEL_COLORS[r.level] }} />
+                  <b>{count(n().count)}</b>
                 </span>
                 <span class="lpat-lvl" style={{ color: LEVEL_COLORS[r.level] }} title={r.level ? LEVEL_NAME[r.level] : "no level"}>
                   {r.level ? LEVEL_NAME[r.level].toUpperCase() : "·"}
@@ -171,8 +245,8 @@ export function LogPatterns(props: { ctx: LogCtx }) {
                 </button>
                 <Show when={spread()}>
                   {(s) => (
-                    <span class="lpat-spread" title={s().all.map((cl) => `${shortName(cl)}: ${count(r.clusters.get(cl) ?? 0)}`).join("\n")}>
-                      <For each={s().all}>{(cl) => <span class="sq" style={{ background: r.clusters.get(cl) ? clusterColor(cl) : undefined }} classList={{ none: !r.clusters.get(cl) }} />}</For>
+                    <span class="lpat-spread" title={s().all.map((cl) => `${shortName(cl)}: ${count(n().clusters.get(cl) ?? 0)}`).join("\n")}>
+                      <For each={s().all}>{(cl) => <span class="sq" style={{ background: n().clusters.get(cl) ? clusterColor(cl) : undefined }} classList={{ none: !n().clusters.get(cl) }} />}</For>
                       <span class="faint" classList={{ "tone-2": s().present.length === 1 }}>
                         {s().note}
                       </span>
@@ -184,7 +258,7 @@ export function LogPatterns(props: { ctx: LogCtx }) {
                 </svg>
                 <span class="lpat-age faint" title="Last seen">
                   {(() => {
-                    const ago = Date.now() - r.last;
+                    const ago = now() - n().last;
                     return ago < 2000 ? "now" : `${gapOf(ago)} ago`;
                   })()}
                 </span>

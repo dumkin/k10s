@@ -74,6 +74,10 @@ describe("query", () => {
     expect(matches("!status:503", line)).toBe(false);
     expect(matches("status!=503", line)).toBe(false);
     expect(matches('msg:"payment failed"', line)).toBe(true);
+    // Quoted alternatives keep their blanks and commas.
+    expect(matches('msg="ok","payment failed: timeout"', line)).toBe(true);
+    expect(matches('msg="ok",done', line)).toBe(false);
+    expect(parseQuery('k="a, b",c,,"" x').terms[0]).toMatchObject({ key: "k", values: ["a, b", "c", ""] });
   });
 
   it("matches a plain line by the term's text, so URLs and key=value text still find it", () => {
@@ -143,14 +147,25 @@ describe("query", () => {
     expect(highlighter(parseQuery("abc bcd"))("abcd")).toEqual([[0, 4]]);
   });
 
-  it("builds terms from values and adds them, replacing one for the same key", () => {
+  it("builds terms from values and adds them: one more value of a field, the opposite one gone", () => {
     expect(fieldTerm("status", 503)).toBe("status=503");
     expect(fieldTerm("msg", "a b")).toBe('msg="a b"');
     expect(fieldTerm("user", "bob", true)).toBe("!user=bob");
     expect(withTerm("", "status=503")).toBe("status=503");
-    expect(withTerm("error status=200", "status=503")).toBe("error status=503");
+    expect(withTerm("error user=bob", "status=503")).toBe("error user=bob status=503");
     expect(withTerm("status=503", "status=503")).toBe("status=503");
-    expect(withTerm("status=503", "!status=503")).toBe("status=503 !status=503");
+    // Another value of a field wanted: either; another left out: neither.
+    expect(withTerm("error status=200", "status=503")).toBe("error status=200,503");
+    expect(withTerm("status=200,503", "status=503")).toBe("status=200,503");
+    expect(withTerm("!path=/healthz error", "!path=/metrics")).toBe("!path=/healthz,/metrics error");
+    expect(withTerm('msg="a b"', fieldTerm("msg", "c, d"))).toBe('msg="a b","c, d"');
+    expect(compile(parseQuery(withTerm('msg="a b"', fieldTerm("msg", "c, d"))))(subject('{"msg":"c, d"}'))).toBe(true);
+    // The same value the other way round goes.
+    expect(withTerm("status=503 error", "!status=503")).toBe("error !status=503");
+    expect(withTerm("status=200,503", "!status=503")).toBe("status=200 !status=503");
+    expect(withTerm("!status=503", "status=503")).toBe("status=503");
+    // Other operators are other terms.
+    expect(withTerm("status>=500 status!=503", "status=502")).toBe("status>=500 status!=503 status=502");
   });
 
   it("describes itself, and has a key per meaning", () => {

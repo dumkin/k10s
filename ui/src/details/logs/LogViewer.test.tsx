@@ -241,6 +241,31 @@ describe("log view", () => {
     expect(root.querySelector(".lines .ln .txt")!.textContent).toBe('{"level":"warn","msg":"slow commit","trace_id":"abc123","latency_ms":2205}');
   });
 
+  it("adds a value clicked to the query: one more left out, one more wanted", async () => {
+    const { root, s } = await mount();
+    const paths = ["/healthz", "/metrics", "/api/orders", "/api/users"];
+    s.send({ t: "lines", l: paths.map((p, k): [number, number, string] => [0, 1000 + k, `{"level":"info","msg":"request","path":"${p}"}`]) });
+    await tick();
+    const pick = async (path: string, option: string) => {
+      const line = [...root.querySelectorAll(".lines .ln")].find((l) => l.querySelector(".txt")?.textContent === `request  path=${path}`)!;
+      line.querySelector<HTMLElement>(".f-click")!.click();
+      await tick();
+      [...document.querySelectorAll<HTMLButtonElement>(".menu .opt")].find((b) => b.textContent?.includes(option))!.click();
+      await tick();
+    };
+    const input = root.querySelector<HTMLInputElement>(".lq-input")!;
+    await pick("/healthz", "Leave out");
+    await pick("/metrics", "Leave out");
+    expect(input.value).toBe("!path=/healthz,/metrics");
+    expect(lines(root)).toEqual(["request  path=/api/orders", "request  path=/api/users"]);
+    // Finding (every line stays): a value wanted is one more of those the query wants.
+    setFilterMode(false);
+    await query(root, "path=/api/orders");
+    await pick("/api/users", "Only lines with this value");
+    expect(input.value).toBe("path=/api/orders,/api/users");
+    expect(lines(root)).toEqual(["request  path=/api/orders", "request  path=/api/users"]);
+  });
+
   it("pauses: what comes meanwhile waits, and is counted", async () => {
     const { root, s } = await mount();
     s.send({ t: "lines", l: [[0, 1000, "before"]] });
@@ -252,6 +277,61 @@ describe("log view", () => {
     expect(root.querySelector(".follow-btn")!.textContent).toContain("Resume · 2 new");
     await key(root, "s");
     expect(lines(root)).toEqual(["before", "during 1", "during 2"]);
+  });
+
+  it("counts the lines by pattern in rows that stay as lines come: a click on one lands", async () => {
+    const { root, s } = await mount();
+    const at = Date.now() - 60_000;
+    const get = (k: number): [number, number, string] => [0, at + k, `GET /api/orders/${k} 200`];
+    s.send({ t: "lines", l: [get(1), get(2), [0, at + 3, "ERROR payment 77 failed"]] });
+    await tick();
+    root.querySelector<HTMLButtonElement>(".seg button:nth-child(2)")!.click();
+    await tick();
+    const rows = () => [...root.querySelectorAll<HTMLElement>(".lpat-row")];
+    const listed = () => rows().map((r) => `${r.querySelector(".lpat-count b")!.textContent} ${r.querySelector(".lpat-text")!.textContent}`);
+    expect(listed()).toEqual(["2 GET /api/orders/<*>", "1 ERROR payment <*> failed"]);
+    const [row, other] = rows();
+    const text = row.querySelector<HTMLElement>(".lpat-text")!;
+
+    // More lines (of these patterns, of a new one): counted in the same rows, a new row for the new pattern.
+    s.send({ t: "lines", l: [get(4), get(5), get(6), [0, at + 7, "WARN slow commit 2205ms"]] });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(listed()).toEqual(["5 GET /api/orders/<*>", "1 ERROR payment <*> failed", "1 WARN slow commit <*>"]);
+    expect(rows()[0]).toBe(row);
+    expect(rows()[1]).toBe(other);
+    expect(text.isConnected).toBe(true);
+
+    // Paused: the patterns stay as they were; resumed, what came meanwhile is counted at once.
+    const pause = root.querySelector<HTMLButtonElement>('.logv-bar [data-hint="s"]')!;
+    pause.click();
+    s.send({ t: "lines", l: [get(8), get(9)] });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(listed()[0]).toBe("5 GET /api/orders/<*>");
+    pause.click();
+    await tick();
+    expect(listed()[0]).toBe("7 GET /api/orders/<*>");
+    expect(rows()[0]).toBe(row);
+
+    // A row pressed does not move (nor change) until it is released: the click lands on it.
+    const order = root.querySelector<HTMLSelectElement>(".lpat-head select")!;
+    order.value = "recent";
+    order.dispatchEvent(new Event("change", { bubbles: true }));
+    await tick();
+    expect(listed()).toEqual(["7 GET /api/orders/<*>", "1 WARN slow commit <*>", "1 ERROR payment <*> failed"]);
+    const pressed = rows()[2].querySelector<HTMLElement>(".lpat-text")!;
+    pressed.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    s.send({ t: "lines", l: [[0, at + 10, "ERROR payment 78 failed"]] });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(listed()).toEqual(["7 GET /api/orders/<*>", "1 WARN slow commit <*>", "1 ERROR payment <*> failed"]);
+    pressed.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0 }));
+    await new Promise((r) => setTimeout(r, 450));
+    expect(listed()).toEqual(["2 ERROR payment <*> failed", "7 GET /api/orders/<*>", "1 WARN slow commit <*>"]);
+    expect(pressed.isConnected).toBe(true);
+
+    // Its text clicked: the lines of that pattern alone.
+    text.click();
+    await tick();
+    expect(lines(root)).toEqual([1, 2, 4, 5, 6, 8, 9].map((k) => `GET /api/orders/${k} 200`));
   });
 
   it("moves a cursor over the lines with the keys, picks several with ⇧ and copies them", async () => {
