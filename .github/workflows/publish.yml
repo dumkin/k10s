@@ -38,8 +38,8 @@ jobs:
         run: |
           version="${TAG#v}"
           mkdir -p dmg
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dmg --pattern "k10s_${version}_aarch64.dmg"
-          sha=$(sha256sum "dmg/k10s_${version}_aarch64.dmg" | cut -d' ' -f1)
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dmg --pattern "k10s-${version}-macos-arm64.dmg"
+          sha=$(sha256sum "dmg/k10s-${version}-macos-arm64.dmg" | cut -d' ' -f1)
           sed -e "s|__REPO__|$GITHUB_REPOSITORY|g" -e "s|__VERSION__|$version|g" -e "s|__SHA256__|$sha|g" \
             -e '/^# /d' packaging/homebrew/k10s.rb > k10s.rb
           cat k10s.rb
@@ -78,5 +78,5 @@ jobs:
         with:
           identifier: Dumkin.k10s
           release-tag: ${{ env.TAG }}
-          installers-regex: '_x64-setup\.exe$'
+          installers-regex: '-windows-x64-setup\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}

@@ -27,8 +27,8 @@ The first release of k10s: one window for many Kubernetes clusters at once, on m
 
 | | |
 | --- | --- |
-| macOS | `k10s_<version>_aarch64.dmg` (Apple silicon) |
-| Windows | `k10s_<version>_x64-setup.exe`, or the `.msi` |
-| Linux | `.AppImage`, `.deb` or `.rpm`: `amd64`/`x86_64` for Intel and AMD, `arm64`/`aarch64` for Arm |
+| macOS | `k10s-<version>-macos-arm64.dmg` (Apple silicon) |
+| Windows | `k10s-<version>-windows-x64-setup.exe`, or the `.msi` |
+| Linux | `.AppImage`, `.deb` or `.rpm`: `linux-x64` for Intel and AMD, `linux-arm64` for Arm |
 
 Already using k10s? It updates itself: restart it when the status bar says the update is ready.

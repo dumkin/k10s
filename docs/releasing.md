@@ -4,11 +4,13 @@ How versions get from a tag to users: the installers on GitHub Releases, the upd
 
 ## How it works
 
-1. A tag `vX.Y.Z` starts the **Release** workflow. It checks that the version in the files matches the tag, opens a **draft** release, and builds on four runners: macOS on Apple silicon, Windows x64, Linux x64 and Linux Arm. Intel Macs aren't built for. Each build uploads its installers and update packages with their signatures, and adds its platform to the update feed, `latest.json`. A last job checks that the feed lists every platform and points it at direct download links.
+1. A tag `vX.Y.Z` starts the **Release** workflow. It checks that the version in the files matches the tag, opens a **draft** release, and builds on four runners: macOS on Apple silicon, Windows x64, Linux x64 and Linux Arm. Intel Macs aren't built for. Each build uploads its installers and update packages, and adds its platform to the update feed, `latest.json`, with the packages' signatures. A last job checks that the feed lists every platform and points it at direct download links.
 2. You read the draft, write the notes and **publish** it. Only then does it become the latest release: running copies of k10s find it (`releases/latest/download/latest.json`), download it in the background and offer to restart into it.
 3. Publishing starts the **Publish** workflow, which updates the Homebrew cask and opens a winget pull request, if those are set up.
 
 Pre-releases (`v0.3.0-beta.1`) are built the same way but marked as pre-releases. GitHub never treats them as the latest release, so they are never offered as updates and never reach Homebrew or winget.
+
+Every file of a release is named `k10s-<version>-<os>-<arch>`, so that the release page lists them by OS: `k10s-0.2.0-macos-arm64.dmg`, `k10s-0.2.0-windows-x64-setup.exe`, `k10s-0.2.0-linux-arm64.deb` and so on. The `<os>-<arch>` of a build is its `files` in `release.yml`; the Homebrew cask, the winget job, the README and the release notes count on these names. The update signatures are inside `latest.json`, not in `.sig` files of their own.
 
 ## One-time setup
 
@@ -85,7 +87,7 @@ From the next published release on, the Publish workflow writes `Casks/k10s.rb` 
 ### 7. winget (optional)
 
 1. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) under the same owner.
-2. Submit the first version by hand, once there is a published release: `wingetcreate new <URL of k10s_X.Y.Z_x64-setup.exe>` (or `komac new`), with the identifier `Dumkin.k10s`, publisher Danil Dumkin and moniker `k10s`.
+2. Submit the first version by hand, once there is a published release: `wingetcreate new <URL of k10s-X.Y.Z-windows-x64-setup.exe>` (or `komac new`), with the identifier `Dumkin.k10s`, publisher Danil Dumkin and moniker `k10s`.
 3. Create a **classic** token with the `public_repo` scope (winget tooling doesn't take fine-grained ones) and save it as `WINGET_TOKEN`.
 
 After that, every published release opens a pull request to winget-pkgs.

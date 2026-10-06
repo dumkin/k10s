@@ -4,7 +4,7 @@ cask "k10s" do
   version "__VERSION__"
   sha256 "__SHA256__"
 
-  url "https://github.com/__REPO__/releases/download/v#{version}/k10s_#{version}_aarch64.dmg"
+  url "https://github.com/__REPO__/releases/download/v#{version}/k10s-#{version}-macos-arm64.dmg"
   name "k10s"
   desc "Multi-cluster Kubernetes desktop client"
   homepage "https://github.com/__REPO__"

@@ -189,19 +189,17 @@ brew install --cask dumkin/tap/k10s
 winget install Dumkin.k10s
 ```
 
-Или скачайте `k10s_<версия>_x64-setup.exe` (или `.msi`) со страницы [релизов](../../releases/latest). Установщик не подписан: если SmartScreen пишет «Система Windows защитила ваш компьютер», нажмите **Подробнее → Выполнить в любом случае**.
+Или скачайте `k10s-<версия>-windows-x64-setup.exe` (или `.msi`) со страницы [релизов](../../releases/latest). Установщик не подписан: если SmartScreen пишет «Система Windows защитила ваш компьютер», нажмите **Подробнее → Выполнить в любом случае**.
 
 ### Linux
 
-Скачайте пакет со страницы [релизов](../../releases/latest), для x86_64 или Arm:
+Скачайте пакет со страницы [релизов](../../releases/latest): `linux-x64` для Intel и AMD, `linux-arm64` для Arm.
 
 ```bash
-sudo apt install ./k10s_*_amd64.deb         # Debian, Ubuntu
-sudo dnf install ./k10s-*.x86_64.rpm        # Fedora, RHEL
-chmod +x k10s_*_amd64.AppImage && ./k10s_*_amd64.AppImage
+sudo apt install ./k10s-*.deb      # Debian, Ubuntu
+sudo dnf install ./k10s-*.rpm      # Fedora, RHEL
+chmod +x k10s-*.AppImage && ./k10s-*.AppImage
 ```
-
-Для Arm берите `_arm64.deb`, `.aarch64.rpm` или `_aarch64.AppImage`.
 
 Нужны WebKitGTK 4.1 и glibc 2.35 или новее: Ubuntu 22.04, Debian 12, Fedora 36 и более поздние.
 

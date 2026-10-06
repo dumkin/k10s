@@ -189,19 +189,17 @@ Releases aren't notarized by Apple. Open **System Settings → Privacy & Securit
 winget install Dumkin.k10s
 ```
 
-Or download `k10s_<version>_x64-setup.exe` (or the `.msi`) from [Releases](../../releases/latest). The installer isn't code-signed: if SmartScreen says "Windows protected your PC", click **More info → Run anyway**.
+Or download `k10s-<version>-windows-x64-setup.exe` (or the `.msi`) from [Releases](../../releases/latest). The installer isn't code-signed: if SmartScreen says "Windows protected your PC", click **More info → Run anyway**.
 
 ### Linux
 
-Download a package from [Releases](../../releases/latest), for x86_64 or Arm:
+Download a package from [Releases](../../releases/latest): `linux-x64` for Intel and AMD, `linux-arm64` for Arm.
 
 ```bash
-sudo apt install ./k10s_*_amd64.deb         # Debian, Ubuntu
-sudo dnf install ./k10s-*.x86_64.rpm        # Fedora, RHEL
-chmod +x k10s_*_amd64.AppImage && ./k10s_*_amd64.AppImage
+sudo apt install ./k10s-*.deb      # Debian, Ubuntu
+sudo dnf install ./k10s-*.rpm      # Fedora, RHEL
+chmod +x k10s-*.AppImage && ./k10s-*.AppImage
 ```
-
-On Arm, take the `_arm64.deb`, `.aarch64.rpm` or `_aarch64.AppImage`.
 
 k10s needs WebKitGTK 4.1 and glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36 and later.
 

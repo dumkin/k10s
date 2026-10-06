@@ -25,24 +25,32 @@ try {
   errors.push(`versions disagree:\n${e.stderr.toString().trim()}`);
 }
 
-// What the release builds = what the update feed must list = what the Homebrew cask downloads.
-const KEYS = {
-  "aarch64-apple-darwin": "darwin-aarch64",
-  "x86_64-apple-darwin": "darwin-x86_64",
-  "x86_64-pc-windows-msvc": "windows-x86_64",
-  "aarch64-pc-windows-msvc": "windows-aarch64",
-  "x86_64-unknown-linux-gnu": "linux-x86_64",
-  "aarch64-unknown-linux-gnu": "linux-aarch64",
+// What the release builds = what the update feed must list = what the Homebrew cask downloads. Each target: its key in
+// the update feed and the <os>-<arch> its files are named with (`files` in release.yml).
+const TARGETS = {
+  "aarch64-apple-darwin": ["darwin-aarch64", "macos-arm64"],
+  "x86_64-apple-darwin": ["darwin-x86_64", "macos-x64"],
+  "x86_64-pc-windows-msvc": ["windows-x86_64", "windows-x64"],
+  "aarch64-pc-windows-msvc": ["windows-aarch64", "windows-arm64"],
+  "x86_64-unknown-linux-gnu": ["linux-x86_64", "linux-x64"],
+  "aarch64-unknown-linux-gnu": ["linux-aarch64", "linux-arm64"],
 };
-const built = [...read(".github/workflows/release.yml").matchAll(/^\s+target:\s*(\S+)\s*$/gm)].map((m) => KEYS[m[1]] ?? `unknown target ${m[1]}`);
+const workflow = read(".github/workflows/release.yml");
+const targets = [...workflow.matchAll(/^\s+target:\s*(\S+)\s*$/gm)].map((m) => m[1]);
+const built = targets.map((t) => TARGETS[t]?.[0] ?? `unknown target ${t}`);
 const feed = JSON.parse(read("scripts/update-feed.mjs").match(/const PLATFORMS = (\[[^\]]*\])/)[1]);
 const diff = (a, b) => a.filter((x) => !b.includes(x));
 if (diff(built, feed).length || diff(feed, built).length) {
   errors.push(`release.yml builds [${built.join(", ")}] but update-feed.mjs expects [${feed.join(", ")}]`);
 }
+// Two builds with the same `files` would overwrite each other's files.
+const files = [...workflow.matchAll(/^\s+files:\s*(\S+)\s*$/gm)].map((m) => m[1]);
+const named = targets.map((t) => TARGETS[t]?.[1] ?? "?");
+if (files.join() !== named.join()) errors.push(`release.yml names the files of [${targets.join(", ")}] [${files.join(", ")}], not [${named.join(", ")}]`);
 const cask = read("packaging/homebrew/k10s.rb");
-if (built.includes("darwin-aarch64") !== cask.includes("_aarch64.dmg")) errors.push("the Homebrew cask and the macOS Apple silicon build disagree");
-if (built.includes("darwin-x86_64") !== /_x64\.dmg/.test(cask)) errors.push("the Homebrew cask and the macOS Intel build disagree");
+for (const mac of ["macos-arm64", "macos-x64"]) {
+  if (files.includes(mac) !== cask.includes(`-${mac}.dmg`)) errors.push(`the Homebrew cask and the ${mac} build disagree`);
+}
 
 // Placeholders that must be gone by the first release.
 for (const file of ["README.md", "README.ru.md"]) {
