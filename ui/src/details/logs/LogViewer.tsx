@@ -13,7 +13,7 @@ import { bindAll, comboLabel } from "../../lib/hotkeys";
 import { shortName } from "../../state/clusters";
 import { onControl } from "../../state/keyboard";
 import { toast } from "../../state/ui";
-import { indexAtPos, type Line, LogBuffer, pickPods, type PodRef, podKeyOf, type Source, Sources } from "../logBuffer";
+import { indexAtPos, type Line, LogBuffer, MAX_BYTES, MAX_LINES, pickPods, type PodRef, podKeyOf, type Source, Sources } from "../logBuffer";
 import { Earlier, type EarlierState } from "./earlier";
 import { LogFields, LogSources } from "./LogPopovers";
 import { LogLines, type LinesHandle } from "./LogLines";
@@ -59,6 +59,8 @@ export const MAX_TARGETS = 50;
 const BIG_LOG = 30_000;
 /** Lines that keep coming are shown at most every `showEvery` ms; the first after a pause at once. (Tests: 0.) */
 export const timing = { showEvery: 100 };
+/** What a view's buffer holds at most. (Tests: less.) */
+export const budget = { bytes: MAX_BYTES, lines: MAX_LINES };
 
 /**
  * A pod to stream: `containers` are its own (they may differ from the template's during a rollout); `restarts`
@@ -226,7 +228,13 @@ export function LogViewer(props: LogViewerProps) {
     { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
   );
 
-  let buffer = new LogBuffer();
+  // A full buffer keeps what the filters show (see `LogBuffer.kept`).
+  const newBuffer = () => {
+    const b = new LogBuffer(budget.bytes, budget.lines);
+    b.keep = () => untrack(() => filters().keep);
+    return b;
+  };
+  let buffer = newBuffer();
   let sources = new Sources();
   /** Live lines as they arrived: [when, how many]; the last 10 s of them make the rate. */
   const arrivals: [number, number][] = [];
@@ -270,7 +278,7 @@ export function LogViewer(props: LogViewerProps) {
   createEffect(
     on(spec, (s) => {
       // This stream's own buffer and sources: a late message of the previous stream cannot reach the new ones.
-      const buf = (buffer = new LogBuffer());
+      const buf = (buffer = newBuffer());
       const srcs = (sources = new Sources());
       patternIds = new PatternIds();
       structures.clear();
@@ -439,14 +447,16 @@ export function LogViewer(props: LogViewerProps) {
     const st: FilterState = { query: query(), filters: filterMode(), levels: levels(), hidden: hidden(), solo: solo(), range: range(), only: only(), hiddenPatterns: hiddenPatterns(), pausedAt: pausedAt() };
     return buildFilters(st, subject, patternOf);
   });
-  // The buffer's views mutate in place: these memos say "changed" on every read of a new version.
-  const patternsBase = createMemo(() => (version(), buffer.view(filters().patterns)), undefined, { equals: false });
-  const base = createMemo(() => (version(), buffer.view(filters().base)), undefined, { equals: false });
-  const shown = createMemo(() => (version(), buffer.view(filters().shown)), undefined, { equals: false });
+  // The buffer's views mutate in place: these memos say "changed" on every read of a new version. Filtered, they show
+  // the entries the buffer kept as well.
+  const withKept = () => filters().keep !== null;
+  const patternsBase = createMemo(() => (version(), buffer.view(filters().patterns, withKept())), undefined, { equals: false });
+  const base = createMemo(() => (version(), buffer.view(filters().base, withKept())), undefined, { equals: false });
+  const shown = createMemo(() => (version(), buffer.view(filters().shown, withKept())), undefined, { equals: false });
   const matches = createMemo(() => {
     version();
     const f = filters().matches;
-    return f ? buffer.view(f) : null;
+    return f ? buffer.view(f, withKept()) : null;
   }, undefined, { equals: false });
   const hl = createMemo<Highlight | undefined>(() => (filters().queryOn ? highlighter(query()) : undefined));
   const filtersOn = createMemo(() => (filterMode() && filters().queryOn) || levels().size > 0 || hidden().size > 0 || solo() !== null || range() !== null || only().size > 0 || hiddenPatterns().size > 0);
@@ -792,7 +802,7 @@ export function LogViewer(props: LogViewerProps) {
     clearFilters,
     addTerm: (term) => {
       batch(() => {
-        setQueryText(withTerm(queryText(), term));
+        setQueryText(withTerm(queryText(), term, matchCase()));
         // Clicking a value filters by it: finding would leave every line shown.
         setFilterMode(true);
       });

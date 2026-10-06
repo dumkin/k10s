@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { Icon } from "../../components/Icon";
 import { count } from "../../lib/format";
 import { gapOf } from "../../lib/logs/format";
@@ -8,6 +8,7 @@ import { clusterColor, shortName } from "../../state/clusters";
 import type { Line } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
 import { LEVEL_COLORS } from "./model";
+import { createPasses } from "./passes";
 
 /** Patterns worked out per pass; a log of 100,000 lines takes a few passes, the view stays responsive. */
 const PER_PASS = 8_000;
@@ -50,30 +51,11 @@ type Sort = "count" | "level" | "recent";
 export function LogPatterns(props: { ctx: LogCtx }) {
   const c = props.ctx;
   const [sort, setSort] = createSignal<Sort>("count");
-  // The lines are counted again at once when they are seen another way (a filter, another stream: the buffer's view is
-  // another array); as lines come (the same array, updated in place) at most every EVERY ms — not while paused (the
-  // patterns stay as they were), nor while a row is pressed: a row moved between the press and the release (taken out
-  // and put back) loses the click.
-  const [tick, setTick] = createSignal(0);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let lastRun = 0;
+  // Counted again as lines come at most every EVERY ms (see `createPasses`: a filter at once, nothing while paused) —
+  // and not while a row is pressed: a row moved between the press and the release (taken out and put back) loses the
+  // click.
   let heldUntil = 0;
-  const run = () => {
-    timer = undefined;
-    const held = heldUntil - performance.now();
-    if (held > 0) timer = setTimeout(run, held);
-    else setTick((t) => t + 1);
-  };
-  const schedule = (ms: number) => {
-    if (timer) return;
-    timer = setTimeout(run, ms);
-  };
-  const view = createMemo(() => c.patternsBase());
-  createEffect(
-    on(c.patternsBase, (lines, before) => {
-      if (lines === before && c.pausedAt() === null) schedule(Math.max(0, lastRun + EVERY - performance.now()));
-    }),
-  );
+  const passes = createPasses(c.patternsBase, c.buffer, EVERY, () => heldUntil - performance.now());
   const hold = (e: PointerEvent) => {
     if (e.button === 0) heldUntil = performance.now() + HOLD;
   };
@@ -83,10 +65,7 @@ export function LogPatterns(props: { ctx: LogCtx }) {
     setTimeout(() => {
       if (!heldUntil) return;
       heldUntil = 0;
-      if (!timer) return;
-      clearTimeout(timer);
-      timer = undefined;
-      schedule(Math.max(0, lastRun + EVERY - performance.now()));
+      passes.release();
     });
   };
   window.addEventListener("pointerup", release);
@@ -95,8 +74,6 @@ export function LogPatterns(props: { ctx: LogCtx }) {
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 1000);
   onCleanup(() => {
-    clearTimeout(timer);
-    timer = undefined;
     heldUntil = 0;
     clearInterval(clock);
     window.removeEventListener("pointerup", release);
@@ -107,11 +84,9 @@ export function LogPatterns(props: { ctx: LogCtx }) {
   let rowsOf = new Map<number, Row>();
   let rowsIds: PatternIds | undefined;
   const data = createMemo(() => {
-    tick();
-    const lines = view();
+    const lines = passes.lines();
     const levels = c.levels();
     const range = c.range();
-    lastRun = performance.now();
     const ids = c.patternIds();
     if (ids !== rowsIds) {
       rowsIds = ids;
@@ -145,8 +120,10 @@ export function LogPatterns(props: { ctx: LogCtx }) {
       if (!n) {
         let r = rowsOf.get(id);
         if (!r) {
+          // (A pattern's key is its level and its text: `3|GET /api/<*>`.)
           const p = ids.patterns[id];
-          r = { id, pattern: p.slice(p.indexOf("|") + 1), level: l.lvl };
+          const bar = p.indexOf("|");
+          r = { id, pattern: p.slice(bar + 1), level: Number(p.slice(0, bar)) as Level };
           rowsOf.set(id, r);
         }
         rows.push(r);
@@ -161,7 +138,7 @@ export function LogPatterns(props: { ctx: LogCtx }) {
       n.spark[Math.min(SPARK - 1, Math.floor(((l.key - first) / span) * SPARK))]++;
     }
     // Patterns of the lines not worked out yet: in the next pass, soon.
-    if (pending) schedule(16);
+    if (pending) passes.soon(16);
     return { rows, counts, total, pending, first, last };
   });
   const sorted = createMemo(() => {

@@ -194,16 +194,27 @@ export interface FilterState {
   pausedAt: number | null;
 }
 
+/** The filters of a log's views (see `buildFilters`). */
+export interface Filters {
+  patterns: Filter;
+  base: Filter;
+  shown: Filter;
+  matches: Filter | null;
+  keep: Filter | null;
+  queryOn: boolean;
+}
+
 /**
  * The views a log shows, from the widest to the narrowest:
  * - `patterns`: what the patterns are counted over (all but the patterns', the levels' and the time's filters —
  *   those apply as they are counted);
  * - `base`: what the histogram and the level counts show (the levels and the time are picked there);
  * - `shown`: the lines shown;
- * - `matches`: the lines shown that the query finds (finding, not filtering), else null.
+ * - `matches`: the lines shown that the query finds (finding, not filtering), else null;
+ * - `keep`: what is shown, a pause aside — what the buffer keeps when it drops the rest (null: everything is shown).
  * Markers (a container terminated…) are not matched by queries or patterns: they stay with their source's lines.
  */
-export function buildFilters(st: FilterState, subject: LineSubject, patternId: (l: Line) => number) {
+export function buildFilters(st: FilterState, subject: LineSubject, patternId: (l: Line) => number): Filters {
   const q = st.query;
   const qKey = queryKey(q);
   const qTest = compile(q);
@@ -238,7 +249,9 @@ export function buildFilters(st: FilterState, subject: LineSubject, patternId: (
     : base;
 
   const matches: Filter | null = !st.filters && qKey !== "" ? { key: `${shown.key}|m${qKey}`, test: (l) => !l.marker && shown.test(l) && lineMatches(l) } : null;
-  return { patterns, base, shown, matches, queryOn: !isEmpty(q) };
+  // What the filters show, a pause aside (null: everything): the buffer keeps it when it drops the rest.
+  const keep: Filter | null = pausedAt === null ? (shown.key ? shown : null) : buildFilters({ ...st, pausedAt: null }, subject, patternId).keep;
+  return { patterns, base, shown, matches, keep, queryOn: !isEmpty(q) };
 }
 
 export const LEVEL_COLORS: Record<Level, string> = {

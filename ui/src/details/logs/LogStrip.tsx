@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../../components/Icon";
 import { count } from "../../lib/format";
 import { clockOf, gapOf } from "../../lib/logs/format";
@@ -7,6 +7,7 @@ import { Level, LEVEL_NAME, LEVELS } from "../../lib/logs/parse";
 import { indexAtKey } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
 import { histogramOpen, setHistogramOpen, utc } from "./model";
+import { createPasses } from "./passes";
 
 const H = 46;
 /** Pixels a bar takes at least (with its gap). */
@@ -41,33 +42,16 @@ const plural = (l: Level, n: number) => (l === Level.None ? "other" : l === Leve
 export function LogStrip(props: { ctx: LogCtx }) {
   const c = props.ctx;
   // Recounted at most a few times a second: a busy stream adds lines every 50 ms.
-  const [tick, setTick] = createSignal(0);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let lastRun = 0;
-  createEffect(
-    on([c.base, c.levels, c.range], () => {
-      if (timer) return;
-      const wait = Math.max(0, lastRun + 250 - performance.now());
-      timer = setTimeout(() => {
-        timer = undefined;
-        lastRun = performance.now();
-        setTick((t) => t + 1);
-      }, wait);
-    }),
-  );
-  onCleanup(() => clearTimeout(timer));
+  const passes = createPasses(c.base, c.buffer, 250);
 
   const [width, setWidth] = createSignal(600);
   const counts = createMemo(() => {
-    tick();
     const n = new Array<number>(LEVEL_SLOTS).fill(0);
-    for (const l of c.base()) if (!l.marker) n[l.lvl]++;
+    for (const l of passes.lines()) if (!l.marker) n[l.lvl]++;
     return n;
   });
-  const hist = createMemo<Histogram | null>(() => {
-    tick();
-    return histogram(c.base(), Math.floor(width() / BAR));
-  });
+  // (Only while it is shown: a memo is worked out whether it is read or not.)
+  const hist = createMemo<Histogram | null>(() => (histogramOpen() && c.roomy() ? histogram(passes.lines(), Math.floor(width() / BAR)) : null));
 
   const rate = c.rate;
 

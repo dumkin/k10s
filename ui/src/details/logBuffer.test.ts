@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, LogTarget } from "../lib/backend";
 import { Level } from "../lib/logs/parse";
-import { ALL, type Filter, LogBuffer, pickPods, plainOf, podDone, type PodRef, Sources } from "./logBuffer";
+import { ALL, type Filter, type Line, LogBuffer, pickPods, plainOf, podDone, type PodRef, Sources } from "./logBuffer";
 
 const containing = (b: LogBuffer, q: string): Filter => (q ? { key: q, test: (l) => b.lower(l).includes(q) } : ALL);
 const texts = (b: LogBuffer, q = "") => b.view(containing(b, q)).map((l) => l.text);
@@ -218,6 +218,162 @@ describe("LogBuffer", () => {
     const upTo = b.seq - 1;
     b.add([[0, 20, "13"]]);
     expect(b.view({ key: `p${upTo}`, test: (l) => l.seq <= upTo && odd.test(l) }).map((l) => l.text)).toEqual(["1", "9", "3", "5", "7", "11"]);
+  });
+
+  it("tells whether a view changed: a revision per view, the same while nothing in it did", () => {
+    const b = new LogBuffer(1e9, 10);
+    const boom: Filter = { key: "boom", test: (l) => l.text.includes("boom") };
+    b.add([[0, 1, "java.lang.IllegalStateException: boom"]]);
+    const view = b.view(boom);
+    const r0 = b.revision(view);
+    const all = b.revision(b.lines);
+    // Lines it leaves out change the buffer, not the view.
+    b.add([[1, 2, "fine"]]);
+    expect([b.view(boom), b.revision(view)]).toEqual([view, r0]);
+    expect(b.revision(b.lines)).toBeGreaterThan(all);
+    // An entry of the view that grew changed it, though it holds as many entries: its level is an error's now.
+    b.add([[0, 3, "\tat com.acme.Orders.place(Orders.java:42)"]]);
+    expect(b.view(boom)).toBe(view);
+    expect(view).toHaveLength(1);
+    expect(view[0].lvl).toBe(Level.Error);
+    const r1 = b.revision(view);
+    expect(r1).toBeGreaterThan(r0);
+    // A line it shows, and lines dropped from it.
+    b.add([[0, 4, "boom again"]]);
+    const r2 = b.revision(b.view(boom));
+    expect(r2).toBeGreaterThan(r1);
+    b.add(Array.from({ length: 20 }, (_, k): LogLine => [1, 10 + k, `fine ${k}`]));
+    expect(b.view(boom)).toEqual([]);
+    expect(b.revision(view)).toBeGreaterThan(r2);
+    // Not a view it keeps.
+    expect(b.revision([])).toBe(-1);
+  });
+
+  it("keeps what the filter shows when the rest is dropped: filtered views show it, the timeline does not", () => {
+    const b = new LogBuffer(1e9, 100);
+    const errors: Filter = { key: "errors", test: (l) => l.text.startsWith("ERROR") };
+    b.keep = () => errors;
+    // (Added and dropped at once: never a hit of the view before.)
+    b.add(Array.from({ length: 300 }, (_, k): LogLine => [0, k, k % 10 === 0 ? `ERROR ${k}` : `line ${k}`]));
+    expect(b.view(errors, true).map((l) => l.text)).toEqual(Array.from({ length: 30 }, (_, k) => `ERROR ${k * 10}`));
+    expect(b.lines.length + b.kept.length).toBeLessThanOrEqual(100);
+    expect(b.lines.at(-1)!.text).toBe("line 299");
+    expect(b.kept.every((l) => l.kept && l.text.startsWith("ERROR"))).toBe(true);
+    expect(b.dropped).toBe(300 - b.lines.length);
+    expect(b.counts[0]).toBe(b.lines.length + b.kept.length);
+    // The timeline, and views of it, are the latest lines as before.
+    expect(b.view(ALL)).toBe(b.lines);
+    expect(b.view(errors)).toEqual(b.lines.filter(errors.test));
+    // Without a filter, what was kept stays; the timeline makes room.
+    const kept = [...b.kept];
+    b.keep = () => null;
+    b.add(Array.from({ length: 100 }, (_, k): LogLine => [0, 300 + k, `ERROR late ${k}`]));
+    expect(b.kept).toEqual(kept);
+    expect(b.lines.length + b.kept.length).toBeLessThanOrEqual(100);
+    b.clear();
+    expect([b.kept.length, b.keptBytes, kept.some((l) => l.kept)]).toEqual([0, 0, false]);
+  });
+
+  it("keeps half the budget at most: the oldest kept go beyond it", () => {
+    const b = new LogBuffer(20_000, 1e6);
+    const errors: Filter = { key: "errors", test: (l) => l.text.startsWith("ERROR") };
+    b.keep = () => errors;
+    b.add(Array.from({ length: 400 }, (_, k): LogLine => [0, k, `${k % 2 ? "line" : "ERROR"} ${k} ${"x".repeat(100)}`]));
+    expect(b.bytes + b.keptBytes).toBeLessThanOrEqual(20_000);
+    expect(b.keptBytes).toBeLessThanOrEqual(10_000);
+    const shown = b.view(errors, true);
+    const at = (l: { text: string }) => Number(l.text.split(" ")[1]);
+    // The latest errors, in order, each once; those that went are no longer kept.
+    expect(shown.at(-1)!.text).toMatch(/^ERROR 398 /);
+    expect(shown.map(at)).toEqual(Array.from({ length: shown.length }, (_, k) => 398 - 2 * (shown.length - 1 - k)));
+    expect(shown.length).toBeGreaterThan(b.lines.filter(errors.test).length);
+    expect(b.kept.every((l) => l.kept)).toBe(true);
+  });
+
+  it("counts what keeping takes: the lower-case copies the filter makes of the entries it keeps", () => {
+    const one = new LogBuffer();
+    one.add([[0, 0, "x"]]);
+    const overhead = one.bytes - 1;
+    const sizes = (ls: Line[]) => ls.reduce((n, l) => n + l.text.length + overhead + (l.lower !== undefined && l.lower !== l.text ? l.lower.length : 0), 0);
+    const b = new LogBuffer(1e9, 10);
+    b.keep = () => ({ key: "error", test: (l) => b.lower(l).includes("error") });
+    b.add(Array.from({ length: 30 }, (_, k): LogLine => [0, k, k % 3 ? `line ${k}` : `Error ${k}`]));
+    expect(b.kept.length).toBeGreaterThan(0);
+    expect([b.bytes, b.keptBytes]).toEqual([sizes(b.lines), sizes(b.kept)]);
+  });
+
+  it("keeps the kept to their half of the budget, lower-case copies made of them since included", () => {
+    const b = new LogBuffer(10_000, 1e6);
+    const errors: Filter = { key: "errors", test: (l) => l.lvl === Level.Error };
+    let keep: Filter | null = errors;
+    b.keep = () => keep;
+    let t = 0;
+    for (let k = 0; k < 40; k++) b.add([[0, t++, k % 2 ? `ERROR ${"X".repeat(1100)}` : `info ${k}`]]);
+    // A query looks into the kept entries (another view's): their lower-case copies count.
+    const foo: Filter = { key: "errors|foo", test: (l) => errors.test(l) && b.lower(l).includes("foo") };
+    b.view(foo, true);
+    keep = null;
+    for (let k = 0; k < 40; k++) b.add([[0, t++, `info later ${k}`]]);
+    expect(b.keptBytes).toBeLessThanOrEqual(5_000);
+    expect(b.bytes + b.keptBytes).toBeLessThanOrEqual(10_000);
+    expect(b.lines.length).toBeGreaterThan(10);
+    expect(b.view(foo, true)).toEqual([...b.kept.filter(foo.test), ...b.lines.filter(foo.test)]);
+  });
+
+  it("keeps a view in order when an entry moves back to its time and is dropped before the view is read", () => {
+    const b = new LogBuffer(1e9, 4);
+    const every: Filter = { key: "every", test: () => true };
+    b.add([
+      [1, 500, "s1 a"],
+      [1, 600, "s1 b"],
+      [1, 700, "s1 c"],
+      [0, 1000, "\tat com.acme.Orders.place(Orders.java:42)"],
+    ]);
+    b.view(every);
+    // The frame's entry joins the stack trace read before it, moves back to its time, and goes with the earliest.
+    b.addEarlier([
+      [0, 50, "e0"],
+      [0, 100, "e1"],
+      [0, 200, "java.lang.IllegalStateException: no stock"],
+    ]);
+    expect(b.view(every)).toEqual(b.lines);
+  });
+
+  it("works an entry's pattern out again when its level changes (a stack trace's frame came later)", () => {
+    const b = new LogBuffer();
+    b.add([[0, 1, "payment failed for order 42"]]);
+    const l = b.lines[0];
+    l.pat = 7;
+    b.add([[0, 2, "\tat com.acme.Orders.place(Orders.java:42)"]]);
+    expect([l.lvl, l.pat]).toEqual([Level.Error, undefined]);
+  });
+
+  it("takes no earlier lines once it dropped entries (a read that ended after it filled up)", () => {
+    const b = new LogBuffer(1e9, 10);
+    b.add(Array.from({ length: 20 }, (_, k): LogLine => [0, 100 + k, `l${k}`]));
+    const held = b.lines.map((l) => l.text);
+    b.addEarlier([[0, 50, "earlier"]]);
+    expect(b.lines.map((l) => l.text)).toEqual(held);
+  });
+
+  it("keeps filtered views with the kept entries in step, however seldom they are read", () => {
+    const b = new LogBuffer(1e9, 60);
+    const errors: Filter = { key: "errors", test: (l) => l.text.includes("ERROR") };
+    const seven: Filter = { key: "seven", test: (l) => l.text.includes("7") };
+    b.keep = () => errors;
+    const expected = (f: Filter) => [...b.kept.filter(f.test), ...b.lines.filter(f.test)].map((l) => l.text);
+    let t = 0;
+    for (let round = 0; round < 40; round++) {
+      const batch: LogLine[] = Array.from({ length: 13 }, (_, k): LogLine => [k % 2, (t += 10), (round * 13 + k) % 5 === 0 ? `ERROR ${round}.${k}` : `line ${round}.${k}`]);
+      // An older line of another source lands in the middle; a stack trace's frame joins an entry.
+      batch.push([2, t - 95, `line late ${round}`], [0, t - 9, "\tat com.acme.Orders.place(Orders.java:42)"]);
+      b.add(batch);
+      if (round % 3 === 0) continue;
+      expect(b.view(errors, true).map((l) => l.text)).toEqual(expected(errors));
+      if (round % 2) expect(b.view(seven, true).map((l) => l.text)).toEqual(expected(seven));
+    }
+    expect(b.kept.length).toBeGreaterThan(0);
+    expect(b.view(errors, true).every((l, k, all) => k === 0 || all[k - 1].pos < l.pos)).toBe(true);
   });
 
   it("counts the entries of each source as they come and go", () => {

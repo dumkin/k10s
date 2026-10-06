@@ -125,7 +125,7 @@ export function LogFields(props: { ctx: LogCtx; anchor: HTMLElement; onClose: ()
                   {(v) => (
                     <div class="lfield-val">
                       <span class="lfield-bar" style={{ width: `${(v.n / f.n) * 100}%` }} />
-                      <button class="lfield-v ellipsis" title={`Only lines with ${f.key} = this (⌥-click: leave them out)`} onClick={(e) => (props.onClose(), c.addTerm(fieldTerm(f.key, v.value, e.altKey)))}>
+                      <button class="lfield-v ellipsis" title={`Show lines with ${f.key} = this (⌥-click: leave them out)`} onClick={(e) => (props.onClose(), c.addTerm(fieldTerm(f.key, v.value, e.altKey)))}>
                         {valueText(v.value)}
                       </button>
                       <span class="faint">{count(v.n)}</span>

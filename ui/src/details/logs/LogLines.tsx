@@ -197,6 +197,17 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
 
   /** Rows above the lines: the dropped lines' note or the earlier lines' row, the pinned columns' header. */
   const dropped = createMemo(() => (c.version(), c.buffer().dropped));
+  const kept = createMemo(() => (c.version(), c.buffer().kept.length));
+  /** How many were dropped — and kept, of what the filters showed: filtered views show those. */
+  const droppedNote = () => {
+    const b = c.buffer();
+    const room = `the view keeps the latest ${count(b.maxLines)} lines, up to ${Math.round(b.maxBytes / 1024 / 1024)} MB`;
+    const k = kept();
+    if (!k) return `… ${count(dropped())} earlier lines dropped (${room})`;
+    if (!c.filtersOn()) return `… ${count(dropped())} earlier lines dropped (${room}); ${count(k)} of them that a filter showed are kept, shown while filtering`;
+    const gone = dropped() - k;
+    return gone ? `… ${count(gone)} earlier lines dropped, ${count(k)} that a filter showed were kept (${room})` : `… ${count(k)} earlier lines that a filter showed were kept (${room})`;
+  };
   const earlierRow = () => {
     const e = c.earlier();
     return e.phase === "more" || e.phase === "loading" || e.phase === "full" || (e.phase === "done" && e.loaded > 0);
@@ -564,7 +575,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
                     </Show>
                   </span>
                   <span class="ld-acts">
-                    <button class="btn sm ghost icon" title={`Only lines with ${key} = this`} onClick={() => c.addTerm(fieldTerm(key, value))}>
+                    <button class="btn sm ghost icon" title={`Show lines with ${key} = this`} onClick={() => c.addTerm(fieldTerm(key, value))}>
                       <Icon name="plus" size={11} />
                     </button>
                     <button class="btn sm ghost icon" title={`Leave out lines with ${key} = this`} onClick={() => c.addTerm(fieldTerm(key, value, true))}>
@@ -622,7 +633,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
         <div class="logv-filtered">
           <Icon name="filter" size={11} />
           <span>
-            Showing {count(c.shown().length)} of {count((c.version(), c.buffer().lines.length))}
+            Showing {count(c.shown().length)} of {count((c.version(), c.buffer().lines.length + c.buffer().kept.length))}
           </span>
           <button class="link-btn" onClick={() => c.clearFilters()}>
             Clear filters
@@ -645,8 +656,8 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
         {/* (A flow root: the columns' header's margin stays inside, the rows' offsets are the content's.) */}
         <div style={{ height: `${totalHeight()}px`, position: "relative", display: "flow-root" }}>
           <Show when={dropped() > 0}>
-            <div class="ln faint ln-note" style={{ position: "absolute", left: "0", right: "0", top: "0" }}>
-              … {count(dropped())} earlier lines dropped (the view keeps the latest {count(c.buffer().maxLines)} lines, up to {Math.round(c.buffer().maxBytes / 1024 / 1024)} MB)
+            <div class="ln faint ln-note" style={{ position: "absolute", left: "0", right: "0", top: "0" }} title={kept() ? "When the view is full, what the filters show is kept (half of the view at most) and what they hide makes room" : undefined}>
+              {droppedNote()}
             </div>
           </Show>
           <Show when={!dropped() && earlierRow()}>
@@ -749,7 +760,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
               </div>
               <button class="opt" role="menuitem" onClick={() => (setValueMenu(null), c.addTerm(fieldTerm(m.key, m.value)))}>
                 <Icon name="plus" size={13} />
-                <span>{TRACE_KEYS.has(m.key) ? "Follow it across pods and clusters" : "Only lines with this value"}</span>
+                <span>{TRACE_KEYS.has(m.key) ? "Follow it across pods and clusters" : "Show lines with this value"}</span>
               </button>
               <button class="opt" role="menuitem" onClick={() => (setValueMenu(null), c.addTerm(fieldTerm(m.key, m.value, true)))}>
                 <Icon name="minus" size={13} />

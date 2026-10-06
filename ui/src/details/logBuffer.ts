@@ -40,6 +40,8 @@ export interface Line {
   lower?: string;
   /** Its pattern (see lib/logs/patterns), once asked for. */
   pat?: number;
+  /** Dropped from the timeline but kept: a filter showed it (see `LogBuffer.kept`). */
+  kept?: boolean;
 }
 
 /** A marker among earlier lines (see `LogBuffer.addEarlier`): after the lines of its source at `ts`. */
@@ -114,6 +116,13 @@ interface View {
   hits: Line[];
   /** The first absolute position changed since the hits were made. */
   stale: number;
+  /** Times the hits changed (see `LogBuffer.revision`). */
+  revision: number;
+  /** The kept entries it shows come first (see `LogBuffer.kept`)… */
+  kept: boolean;
+  /** …as of the entries dropped and the kept ones gone then: those dropped since leave it, those kept since come in. */
+  base: number;
+  forgotten: number;
 }
 
 /** Views kept up to date at once (the lines shown, their matches, the histogram's…). */
@@ -129,9 +138,18 @@ const MAX_VIEWS = 8;
  */
 export class LogBuffer {
   lines: Line[] = [];
-  /** Entries dropped to stay within the budget so far. */
+  /** Entries dropped from the timeline to stay within the budget so far (the kept ones too). */
   dropped = 0;
   bytes = 0;
+  /**
+   * Entries dropped from the timeline that a filter showed then, oldest first: filtered views show them too (see
+   * `view`), so what a filter shows piles up while what it hides makes room. They take half the budget at most: beyond
+   * it, the oldest of them go.
+   */
+  kept: Line[] = [];
+  keptBytes = 0;
+  /** What the view shows now (null: everything): entries it lets through are kept when the buffer is full. */
+  keep: (() => Filter | null) | null = null;
   /** Lines and markers that arrived so far (`Line.seq` counts them). */
   seq = 0;
   /** Entries in the buffer per source. */
@@ -141,6 +159,10 @@ export class LogBuffer {
   private lastEntry = new Map<number, Line>();
   private lastTs = new Map<number, number | null>();
   private views = new Map<string, View>();
+  /** Times the entries changed (the unfiltered view's revision). */
+  private changes = 0;
+  /** Kept entries that went so far (beyond their share of the budget). */
+  private forgotten = 0;
 
   constructor(
     readonly maxBytes = MAX_BYTES,
@@ -175,10 +197,11 @@ export class LogBuffer {
    * Adds lines written before those the buffer holds of their sources (earlier history, read after them): each
    * source's lines in order. They make entries of their own; a source's first entry held joins the last one read
    * when it continues it (a stack trace the first read began inside of is whole again). They are no arrivals: a
-   * pause shows them. `markers` go after the lines of their time.
+   * pause shows them. `markers` go after the lines of their time. None once entries were dropped (a read that ended
+   * after the buffer filled up): they would go before a gap, and be the first to go.
    */
   addEarlier(batch: LogLine[], markers: readonly EarlierMarker[] = []) {
-    if (!batch.length && !markers.length) return;
+    if ((!batch.length && !markers.length) || this.dropped > 0) return;
     const incoming: Line[] = [];
     const last = new Map<number, Line>();
     const lastTs = new Map<number, number | null>();
@@ -244,7 +267,11 @@ export class LogBuffer {
         (prev.more ??= []).push(text);
         (prev.moreWidth ??= []).push(plain.length);
         if (how === 2) prev.stack = true;
-        if (how === 2 && prev.lvl === Level.None) prev.lvl = Level.Error;
+        if (how === 2 && prev.lvl === Level.None) {
+          prev.lvl = Level.Error;
+          // (A pattern goes with its level.)
+          prev.pat = undefined;
+        }
         prev.lower = undefined;
         this.bytes += size(prev);
         if (ts !== null) lastTs.set(i, ts);
@@ -308,23 +335,54 @@ export class LogBuffer {
 
   /** Entries from absolute position `pos` on changed: views look at them again. */
   private touch(pos: number) {
+    this.changes++;
     for (const v of this.views.values()) v.stale = Math.min(v.stale, pos);
   }
 
   private evict() {
     const lines = this.lines;
-    if (this.bytes <= this.maxBytes && lines.length <= this.maxLines) return;
-    // Down to 90%, so dropping (which moves the whole array) happens rarely.
+    const kept = this.kept;
+    if (this.bytes + this.keptBytes <= this.maxBytes && lines.length + kept.length <= this.maxLines) return;
+    // Down to 90%, so dropping (which moves the whole array) happens rarely. What the filter shows is kept, half the
+    // budget at most (with the lower-case copies made of it since): beyond it, the oldest kept go.
+    const keep = this.keep?.() ?? null;
     const bytes = this.maxBytes * 0.9;
     const count = Math.floor(this.maxLines * 0.9);
     let k = 0;
-    while (k < lines.length - 1 && (this.bytes > bytes || lines.length - k > count)) {
+    let out = 0;
+    const trim = () => {
+      while (out < kept.length && (this.keptBytes > this.maxBytes / 2 || kept.length - out > this.maxLines / 2)) {
+        const o = kept[out++];
+        o.kept = false;
+        this.keptBytes -= size(o);
+        this.counts[o.i]--;
+      }
+    };
+    trim();
+    while (k < lines.length - 1 && (this.bytes + this.keptBytes > bytes || lines.length - k + kept.length - out > count)) {
       const l = lines[k++];
-      this.bytes -= size(l);
-      this.counts[l.i]--;
+      // (The test may make its lower-case copy, which counts: its size after the test.)
+      const shown = !!keep?.test(l);
+      const n = size(l);
+      this.bytes -= n;
+      if (!shown) {
+        this.counts[l.i]--;
+        continue;
+      }
+      l.kept = true;
+      kept.push(l);
+      this.keptBytes += n;
+      trim();
     }
-    lines.splice(0, k);
-    this.dropped += k;
+    if (out) {
+      kept.splice(0, out);
+      this.forgotten += out;
+    }
+    if (k) {
+      lines.splice(0, k);
+      this.dropped += k;
+      this.changes++;
+    }
   }
 
   /** The entry's plain text in lower case (kept once made; it counts towards the budget). */
@@ -333,7 +391,10 @@ export class LogBuffer {
       const lower = plainOf(l).toLowerCase();
       // Text already in lower case is shared, not copied.
       l.lower = lower === l.text ? l.text : lower;
-      if (l.lower !== l.text) this.bytes += lower.length;
+      if (l.lower !== l.text) {
+        if (l.kept) this.keptBytes += lower.length;
+        else this.bytes += lower.length;
+      }
     }
     return l.lower;
   }
@@ -344,46 +405,87 @@ export class LogBuffer {
   }
 
   /**
-   * The entries `filter` lets through. Kept up to date incrementally (a few views at once, the least recently
-   * read go first); do not modify. The empty filter is the buffer itself.
+   * The entries `filter` lets through — `withKept`: the kept ones too, before the others. Kept up to date
+   * incrementally (a few views at once, the least recently read go first); do not modify. The empty filter is the
+   * buffer itself (when there are no kept entries to show).
    */
-  view(filter: Filter): Line[] {
-    if (!filter.key) return this.lines;
-    let v = this.views.get(filter.key);
+  view(filter: Filter, withKept = false): Line[] {
+    const kept = withKept && this.kept.length > 0;
+    if (!filter.key && !kept) return this.lines;
+    const key = kept ? `+${filter.key}` : filter.key;
+    let v = this.views.get(key);
     if (v) {
       // Most recently read last.
-      this.views.delete(filter.key);
-      this.views.set(filter.key, v);
+      this.views.delete(key);
+      this.views.set(key, v);
     } else {
-      v = { filter, hits: this.lines.filter(filter.test), stale: Infinity };
-      this.views.set(filter.key, v);
+      const hits = kept ? [...this.kept.filter(filter.test), ...this.lines.filter(filter.test)] : this.lines.filter(filter.test);
+      v = { filter, hits, stale: Infinity, revision: 0, kept, base: this.dropped, forgotten: this.forgotten };
+      this.views.set(key, v);
       if (this.views.size > MAX_VIEWS) this.views.delete(this.views.keys().next().value!);
       return v.hits;
     }
     const hits = v.hits;
+    const length = hits.length;
+    let matched = false;
     const base = this.dropped;
     if (v.stale !== Infinity) {
       // Entries from `stale` on were merged anew or grew: their hits go (wherever they are now), they are matched again.
+      // (Kept hits stay: they were dropped before the view was last read, below any position touched since.)
       while (hits.length && hits[hits.length - 1].pos >= v.stale) hits.pop();
     }
-    let gone = 0;
-    while (gone < hits.length && hits[gone].pos < base) gone++;
-    if (gone) hits.splice(0, gone);
+    if (!v.kept) {
+      let gone = 0;
+      while (gone < hits.length && hits[gone].pos < base) gone++;
+      if (gone) hits.splice(0, gone);
+    } else if (v.base !== base || v.forgotten !== this.forgotten) {
+      // Entries dropped meanwhile go, and the kept ones gone. Those kept before stay; those kept since come in after
+      // them, as the filter lets them through (some were dropped before they were ever hits).
+      let to = 0;
+      let k = 0;
+      for (; k < hits.length && hits[k].pos < base; k++) if (hits[k].pos < v.base && hits[k].kept) hits[to++] = hits[k];
+      const rest = hits.slice(k);
+      hits.length = to;
+      const test = v.filter.test;
+      for (let j = indexAtPos(this.kept, v.base); j < this.kept.length; j++) if (test(this.kept[j])) hits.push(this.kept[j]);
+      for (const l of rest) hits.push(l);
+      matched = true;
+    }
+    v.base = base;
+    v.forgotten = this.forgotten;
     if (v.stale !== Infinity) {
       const test = v.filter.test;
       for (let k = Math.max(0, v.stale - base); k < this.lines.length; k++) {
         const l = this.lines[k];
-        if (test(l)) hits.push(l);
+        if (test(l)) {
+          hits.push(l);
+          matched = true;
+        }
       }
       v.stale = Infinity;
     }
+    // (Hits matched again may be the same entries, grown.)
+    if (matched || hits.length !== length) v.revision++;
     return hits;
+  }
+
+  /**
+   * How many times a view (as `view` returned it) changed: the same number, the same entries — to count them again
+   * only when they changed. -1: not a view kept up to date.
+   */
+  revision(view: readonly Line[]): number {
+    if (view === this.lines) return this.changes;
+    for (const v of this.views.values()) if (v.hits === view) return v.revision;
+    return -1;
   }
 
   clear() {
     this.lines = [];
     this.dropped = 0;
     this.bytes = 0;
+    for (const l of this.kept) l.kept = false;
+    this.kept = [];
+    this.keptBytes = 0;
     this.counts = [];
     this.lastKey.clear();
     this.lastEntry.clear();

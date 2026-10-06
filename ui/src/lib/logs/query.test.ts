@@ -78,6 +78,17 @@ describe("query", () => {
     expect(matches('msg="ok","payment failed: timeout"', line)).toBe(true);
     expect(matches('msg="ok",done', line)).toBe(false);
     expect(parseQuery('k="a, b",c,,"" x').terms[0]).toMatchObject({ key: "k", values: ["a, b", "c", ""] });
+    // A quote opens an item at its start only: elsewhere it is a character.
+    expect(parseQuery('path=/a"b,/c').terms[0]).toMatchObject({ values: ['/a"b', "/c"] });
+  });
+
+  it("finds the values a log escapes, as clicking them adds them: quotes, tabs, beyond ASCII", () => {
+    expect(matches(fieldTerm("msg", "a\tb"), '{"msg":"a\\tb"}')).toBe(true);
+    expect(matches(fieldTerm("msg", 'say "hi"'), '{"msg":"say \\"hi\\""}')).toBe(true);
+    expect(matches(fieldTerm("msg", 'say "hi"', true), '{"msg":"say \\"hi\\""}')).toBe(false);
+    expect(matches(fieldTerm("msg", "café"), '{"msg":"caf\\u00e9"}')).toBe(true);
+    // Typed, not JSON: a backslash keeps what follows it.
+    expect(parseQuery('path:"C:\\Windows"').terms[0]).toMatchObject({ values: ["C:Windows"] });
   });
 
   it("matches a plain line by the term's text, so URLs and key=value text still find it", () => {
@@ -166,6 +177,15 @@ describe("query", () => {
     expect(withTerm("!status=503", "status=503")).toBe("status=503");
     // Other operators are other terms.
     expect(withTerm("status>=500 status!=503", "status=502")).toBe("status>=500 status!=503 status=502");
+    // Keys as the query reads them, values too: in any case, unless it matches case.
+    expect(withTerm("level=ERROR", "!level=error")).toBe("!level=error");
+    expect(withTerm("Status=200", "status=503")).toBe("Status=200,503");
+    expect(withTerm("user=Bob", "user=bob")).toBe("user=Bob");
+    expect(withTerm("user=Bob", "user=bob", true)).toBe("user=Bob,bob");
+    // A trailing comma; a quote left open (what would be taken into it goes before it).
+    expect(withTerm("status=200,", "status=503")).toBe("status=200,503");
+    expect(withTerm('msg="abc', "msg=x")).toBe('msg=x msg="abc');
+    expect(withTerm('"conn', "pod=web")).toBe('pod=web "conn');
   });
 
   it("describes itself, and has a key per meaning", () => {

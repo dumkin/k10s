@@ -30,6 +30,12 @@ describe("completing a query", () => {
     expect(spot("level:warn,er|")).toMatchObject({ prefix: "er", from: 11, to: 13, list: true });
     expect(spot("level:wa|,error")).toMatchObject({ prefix: "wa", from: 6, to: 8, list: true });
     expect(spot('msg:"connection re|')).toMatchObject({ prefix: "connection re", from: 4, quoted: true });
+    // Items in quotes are items too, and a comma in quotes is in the item.
+    expect(spot('msg="a b",c|')).toMatchObject({ prefix: "c", from: 10, to: 11, quoted: false, list: true });
+    expect(spot('msg=a,"b, c|')).toMatchObject({ prefix: "b, c", from: 6, to: 11, quoted: true, list: true });
+    expect(spot('msg="a, b|"')).toMatchObject({ prefix: "a, b", from: 4, to: 10, quoted: true, list: false });
+    // What is typed, as the query reads it: an escaped quote is a quote.
+    expect(spot('msg="ab\\"|')).toMatchObject({ prefix: 'ab"', quoted: true });
   });
 
   it("puts a name with its operator, a value quoted when it must be and a blank after it", () => {
@@ -40,6 +46,8 @@ describe("completing a query", () => {
     expect(take("msg:con|", "connection refused")).toBe('msg:"connection refused" |');
     expect(take('msg:"con|', "connection refused")).toBe('msg:"connection refused" |');
     expect(take("level:warn,e|", "error")).toBe("level:warn,error|");
+    expect(take('msg="a b",c|', "connection refused")).toBe('msg="a b","connection refused"|');
+    expect(take('msg=a,"b|', "b c")).toBe('msg=a,"b c"|');
   });
 
   it("ranks what starts with what is typed first, then a word in it, the most common first", () => {

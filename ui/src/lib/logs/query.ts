@@ -101,25 +101,43 @@ export function tokenize(input: string): Token[] {
   return out;
 }
 
-const unquote = (s: string) => (s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).replace(/\\(.)/g, "$1") : s);
+/** A quoted value as meant: its escapes undone (as `valueTerm` writes them; else a backslash keeps what follows it). */
+export function unquote(s: string): string {
+  if (s.length < 2 || !s.startsWith('"') || !s.endsWith('"')) return s;
+  try {
+    const v: unknown = JSON.parse(s);
+    if (typeof v === "string") return v;
+  } catch {
+    // Typed, not JSON (`"C:\Windows"`).
+  }
+  return s.slice(1, -1).replace(/\\(.)/g, "$1");
+}
 
-/** A term's values as written (a quoted one with its quotes): `a,"b, c"` is `a` and `"b, c"`. */
-function itemsOf(rest: string): string[] {
-  const out: string[] = [];
+/**
+ * The items of a term's values (`a,"b, c"`: `a` and `"b, c"`): where each is, as [start, end), empty ones too, and
+ * whether the last one leaves its quote open. A quote opens an item only at its start: elsewhere it is a character.
+ */
+export function scanItems(rest: string): { spans: [number, number][]; open: boolean } {
+  const spans: [number, number][] = [];
   let from = 0;
   let quoted = false;
   for (let i = 0; i < rest.length; i++) {
     const c = rest[i];
-    if (c === "\\" && quoted) i++;
-    else if (c === '"') quoted = !quoted;
-    else if (c === "," && !quoted) {
-      out.push(rest.slice(from, i));
+    if (quoted) {
+      if (c === "\\") i++;
+      else if (c === '"') quoted = false;
+    } else if (c === '"' && i === from) quoted = true;
+    else if (c === ",") {
+      spans.push([from, i]);
       from = i + 1;
     }
   }
-  out.push(rest.slice(from));
-  return out.filter(Boolean);
+  spans.push([from, rest.length]);
+  return { spans, open: quoted };
 }
+
+/** A term's values as written (a quoted one with its quotes). */
+const itemsOf = (rest: string) => scanItems(rest).spans.map(([from, to]) => rest.slice(from, to)).filter(Boolean);
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -241,7 +259,8 @@ function levelTest(level: Level, op: Op, values: string[]): boolean {
   return op === "!=" ? !hit : hit;
 }
 
-function fieldTest(t: Extract<Term, { kind: "field" }>, s: Subject, matchCase: boolean): boolean {
+/** `inText`: what a line's text must have for it to match (in lower case), when that is known. */
+function fieldTest(t: Extract<Term, { kind: "field" }>, s: Subject, matchCase: boolean, inText: string[] | null): boolean {
   const key = t.key.toLowerCase();
   if (!t.values.length) {
     // `key:` alone: the line has the field (every line has a level and a source; a plain one: it says `key:`).
@@ -268,9 +287,9 @@ function fieldTest(t: Extract<Term, { kind: "field" }>, s: Subject, matchCase: b
   }
   // Before a line is parsed for its fields: what is looked for must be in its text (it then holds for most lines).
   if (t.op === ":" || t.op === "=") {
-    if (!t.globs.some(Boolean)) {
+    if (inText) {
       const lower = s.lower();
-      if (!t.values.some((v) => lower.includes(v.toLowerCase()))) return false;
+      if (!inText.some((v) => lower.includes(v))) return false;
     }
   } else if (t.op !== "!=" && !s.lower().includes(key.slice(key.lastIndexOf(".") + 1))) return false;
   const v = s.field(t.key);
@@ -292,7 +311,13 @@ export function compile(q: Query): (s: Subject) => boolean {
     } else if (t.kind === "regex") {
       const re = t.re;
       test = (s) => re.test(s.text());
-    } else test = (s) => fieldTest(t, s, matchCase);
+    } else {
+      // A value is in a line's text as it is, unless a log escapes it there (quotes, backslashes, control characters,
+      // anything beyond ASCII): such values are looked for in the fields alone.
+      const verbatim = !t.globs.some(Boolean) && t.values.every((v) => /^[\x20-\x7e]*$/.test(v) && !/["\\]/.test(v));
+      const inText = verbatim ? t.values.map((v) => v.toLowerCase()) : null;
+      test = (s) => fieldTest(t, s, matchCase, inText);
+    }
     return t.not ? (s) => !test(s) : test;
   });
   // Cheap tests first: text, then regular expressions, then fields (they may parse the line).
@@ -366,38 +391,43 @@ function equalityOf(raw: string) {
   const not = raw.length > 1 && raw.startsWith("!");
   const f = FIELD.exec(not ? raw.slice(1) : raw);
   if (!f || f[2] !== "=") return null;
-  const items = itemsOf(f[3]);
-  return { not, key: f[1], head: raw.slice(0, raw.length - f[3].length), items, values: items.map(unquote) };
+  const { spans, open } = scanItems(f[3]);
+  const items = spans.map(([from, to]) => f[3].slice(from, to)).filter(Boolean);
+  return { not, key: f[1].toLowerCase(), head: raw.slice(0, raw.length - f[3].length), items, values: items.map(unquote), open };
 }
 
 /**
  * Adds a term to the input. A value of a field the input has a term for, the same way (wanted, or left out), is one
  * more of its values (`key=a` and `key=b`: `key=a,b`, either); the same value the other way round goes (`!key=a` for
- * `key=a`).
+ * `key=a`). Values are told apart as the query matches them (`matchCase`).
  */
-export function withTerm(input: string, term: string): string {
+export function withTerm(input: string, term: string, matchCase = false): string {
   const trimmed = input.trim();
   if (!trimmed) return term;
   const tokens = tokenize(trimmed).map((t) => t.raw);
   if (tokens.includes(term)) return trimmed;
   const add = equalityOf(term);
-  if (!add) return [...tokens, term].join(" ");
+  const has = (values: string[], v: string) => values.some((w) => (matchCase ? w === v : w.toLowerCase() === v.toLowerCase()));
   const out: string[] = [];
   let joined = false;
   for (const raw of tokens) {
-    const t = equalityOf(raw);
-    if (!t || t.key !== add.key) out.push(raw);
+    const t = add && equalityOf(raw);
+    if (!add || !t || t.key !== add.key) out.push(raw);
     else if (t.not !== add.not) {
-      const items = t.items.filter((_, i) => !add.values.includes(t.values[i]));
+      const items = t.items.filter((_, i) => !has(add.values, t.values[i]));
       if (items.length === t.items.length) out.push(raw);
       else if (items.length) out.push(t.head + items.join(","));
-    } else if (!joined) {
-      const more = add.items.filter((_, i) => !t.values.includes(add.values[i]));
-      out.push(more.length ? `${raw},${more.join(",")}` : raw);
+    } else if (!joined && !t.open) {
+      const more = add.items.filter((_, i) => !has(t.values, add.values[i]));
+      out.push(more.length ? `${raw.replace(/,+$/, "")},${more.join(",")}` : raw);
       joined = true;
     } else out.push(raw);
   }
-  if (!joined) out.push(term);
+  if (!joined) {
+    // (After a quote left open, the term would be in it: it goes before.)
+    const at = out.length && tokenize(`${out[out.length - 1]} ${term}`).length < 2 ? out.length - 1 : out.length;
+    out.splice(at, 0, term);
+  }
   return out.join(" ");
 }
 

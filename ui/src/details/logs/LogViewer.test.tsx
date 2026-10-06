@@ -6,7 +6,7 @@ import { installHotkeys } from "../../lib/hotkeys";
 import type { DetailProps } from "../../registry/details";
 import type { UIRow } from "../../state/view";
 import { LogsTab } from "../LogsTab";
-import { timing } from "./LogViewer";
+import { budget, timing } from "./LogViewer";
 import { setFilterMode, setFold, setPinned, setPretty } from "./model";
 
 // The log view as a whole: a pod's stream (the engine is a recorder), what the filters and the keys do to it.
@@ -203,6 +203,18 @@ describe("log view", () => {
     expect(lines(root)).toEqual(["ERROR b", "ERROR d"]);
   });
 
+  it("counts the levels again a few times a second, not for every batch", async () => {
+    const { root, s } = await mount();
+    const chips = () => [...root.querySelectorAll(".lchip")].map((c) => c.textContent);
+    s.send({ t: "lines", l: [[0, 1000, "ERROR a"]] });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(chips()).toEqual(["1 error"]);
+    s.send({ t: "lines", l: [[0, 2000, "ERROR b"], [0, 3000, "WARN c"]] });
+    expect(chips()).toEqual(["1 error"]);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(chips()).toEqual(["2 errors", "1 warning"]);
+  });
+
   it("marks in the timeline where a container terminated and where it ran again", async () => {
     const { root, s } = await mount();
     s.send({ t: "lines", l: [[0, Date.now() - 5000, "working"]] });
@@ -261,9 +273,41 @@ describe("log view", () => {
     // Finding (every line stays): a value wanted is one more of those the query wants.
     setFilterMode(false);
     await query(root, "path=/api/orders");
-    await pick("/api/users", "Only lines with this value");
+    await pick("/api/users", "Show lines with this value");
     expect(input.value).toBe("path=/api/orders,/api/users");
     expect(lines(root)).toEqual(["request  path=/api/orders", "request  path=/api/users"]);
+  });
+
+  it("keeps the lines a filter shows when the view is full: they pile up, the rest makes room", async () => {
+    const was = { ...budget };
+    budget.lines = 100;
+    try {
+      const { root, s } = await mount();
+      await query(root, "error");
+      for (let k = 0; k < 6; k++) {
+        s.send({ t: "lines", l: Array.from({ length: 50 }, (_, j): [number, number, string] => [0, 1000 + k * 50 + j, (k * 50 + j) % 10 ? `line ${k * 50 + j}` : `ERROR ${k * 50 + j}`]) });
+        await tick();
+      }
+      const header = () => root.querySelector(".logv-filtered")!.textContent;
+      const note = () => root.querySelector(".ln-note")!.textContent;
+      // All 30 errors, though the view holds 100 lines.
+      expect(header()).toMatch(/Showing 30 of \d+/);
+      expect(note()).toMatch(/^… \d+ earlier lines dropped, \d+ that a filter showed were kept/);
+      const el = root.querySelector<HTMLElement>(".code.logs")!;
+      el.dispatchEvent(new Event("wheel"));
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event("scroll"));
+      await tick();
+      expect(lines(root).slice(0, 3)).toEqual(["ERROR 0", "ERROR 10", "ERROR 20"]);
+      // Unfiltered: the latest lines, as before; the kept ones wait for a filter.
+      await query(root, "");
+      expect(note()).toMatch(/; \d+ of them that a filter showed are kept, shown while filtering$/);
+      expect(lines(root)).not.toContain("ERROR 0");
+      await query(root, "error");
+      expect(header()).toMatch(/Showing 30 of/);
+    } finally {
+      Object.assign(budget, was);
+    }
   });
 
   it("pauses: what comes meanwhile waits, and is counted", async () => {
@@ -332,6 +376,19 @@ describe("log view", () => {
     text.click();
     await tick();
     expect(lines(root)).toEqual([1, 2, 4, 5, 6, 8, 9].map((k) => `GET /api/orders/${k} 200`));
+  });
+
+  it("shows a pattern at the level its lines have now: a stack trace's frame that came later makes it an error", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: [[0, 1000, "payment failed for order 42"]] });
+    await tick();
+    root.querySelector<HTMLButtonElement>(".seg button:nth-child(2)")!.click();
+    await tick();
+    const rows = () => [...root.querySelectorAll(".lpat-row")].map((r) => `${r.querySelector(".lpat-lvl")!.textContent} ${r.querySelector(".lpat-text")!.textContent}`);
+    expect(rows()).toEqual(["· payment failed for order <*>"]);
+    s.send({ t: "lines", l: [[0, 1001, "\tat com.acme.Orders.place(Orders.java:42)"]] });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(rows()).toEqual(["ERROR payment failed for order <*>"]);
   });
 
   it("moves a cursor over the lines with the keys, picks several with ⇧ and copies them", async () => {

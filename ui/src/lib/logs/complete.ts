@@ -1,4 +1,4 @@
-import { FIELD_NAME, type Op, OPS, tokenize, valueTerm } from "./query";
+import { FIELD_NAME, type Op, OPS, scanItems, tokenize, unquote, valueTerm } from "./query";
 
 // Completing a query as it is typed: where a term's field name is typed, the fields there are; after its operator,
 // that field's values.
@@ -7,7 +7,7 @@ import { FIELD_NAME, type Op, OPS, tokenize, valueTerm } from "./query";
 export type Spot =
   /** `from`…`to`: the name (all of it, the caret may be inside); `op`: the operator after it, if there is one. */
   | { kind: "key"; prefix: string; from: number; to: number; op: Op | null }
-  /** `from`…`to`: the value (the item of a list `a,b` the caret is in); `quoted`: it starts with a quote. */
+  /** `from`…`to`: the value (the item of a list `a,"b c"` the caret is in); `quoted`: it starts with a quote. */
   | { kind: "value"; key: string; op: Op; prefix: string; from: number; to: number; quoted: boolean; list: boolean };
 
 /**
@@ -33,15 +33,19 @@ export function spotAt(input: string, caret: number, explicit = false): Spot | n
   if (!name || !op) return null;
   const start = keyEnd + op.length;
   if (caret < start) return null;
-  if (input[start] === '"') {
-    const prefix = input.slice(start + 1, caret).replace(/"$/, "").replace(/\\(.)/g, "$1");
-    return { kind: "value", key: name, op, prefix, from: start, to: tok.end, quoted: true, list: false };
+  // The item the caret is in (a list `a,"b, c"` has two).
+  const items = scanItems(input.slice(start, tok.end)).spans;
+  const [itemFrom, itemTo] = items.find(([, to]) => caret <= start + to)!;
+  const from = start + itemFrom;
+  const to = start + itemTo;
+  const list = items.length > 1;
+  if (input[from] === '"') {
+    // What is typed of it, as the query reads it (its quote closed if still open).
+    const typed = input.slice(from, caret);
+    const prefix = unquote(scanItems(typed).open ? `${typed}"` : typed);
+    return { kind: "value", key: name, op, prefix, from, to, quoted: true, list };
   }
-  const comma = input.lastIndexOf(",", caret - 1);
-  const from = comma >= start ? comma + 1 : start;
-  const next = input.indexOf(",", caret);
-  const to = next >= 0 && next < tok.end ? next : tok.end;
-  return { kind: "value", key: name, op, prefix: input.slice(from, caret), from, to, quoted: false, list: from > start || to < tok.end };
+  return { kind: "value", key: name, op, prefix: input.slice(from, caret), from, to, quoted: false, list };
 }
 
 /**
