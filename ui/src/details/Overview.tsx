@@ -66,7 +66,38 @@ export function Overview(props: DetailProps) {
 function MetadataSection(props: { o: K8sObject; cluster: string }) {
   const md = () => props.o.metadata ?? {};
   const [showAnn, setShowAnn] = createSignal(false);
-  const annotations = () => Object.entries((md().annotations ?? {}) as Record<string, string>).filter(([k]) => k !== "kubectl.kubernetes.io/last-applied-configuration");
+  // By the maps themselves, the same objects while unchanged (see `useObject`), not by the metadata: that is new with
+  // every change of the object, its resource version in it.
+  const labelMap = createMemo(() => md().labels);
+  const annotationMap = createMemo(() => md().annotations);
+  const annotations = createMemo(() => Object.entries((annotationMap() ?? {}) as Record<string, string>).filter(([k]) => k !== "kubectl.kubernetes.io/last-applied-configuration"));
+  // Made once, not in the list below (see `KV`): "+N more" stays open, and the annotations shown stay as they are.
+  const labels = <Labels labels={labelMap()} />;
+  const annotationList = (
+    <Show
+      when={showAnn()}
+      fallback={
+        <button class="btn sm ghost" onClick={() => setShowAnn(true)}>
+          Show {annotations().length} annotation{annotations().length > 1 ? "s" : ""}
+        </button>
+      }
+    >
+      <div class="cards">
+        <For each={annotations()}>
+          {([k, v]) => (
+            <div>
+              <div class="mono faint" style={{ "font-size": "10.5px" }}>
+                {k}
+              </div>
+              <div class="mono selectable" style={{ "word-break": "break-all", "white-space": "pre-wrap" }}>
+                {v}
+              </div>
+            </div>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
   return (
     <Section title="Metadata">
       <KV
@@ -96,35 +127,8 @@ function MetadataSection(props: { o: K8sObject; cluster: string }) {
             ) : undefined,
           ],
           ["Finalizers", md().finalizers?.length ? <span class="mono">{(md().finalizers as string[]).join(", ")}</span> : undefined],
-          ["Labels", <Labels labels={md().labels} />],
-          [
-            "Annotations",
-            annotations().length ? (
-              <Show
-                when={showAnn()}
-                fallback={
-                  <button class="btn sm ghost" onClick={() => setShowAnn(true)}>
-                    Show {annotations().length} annotation{annotations().length > 1 ? "s" : ""}
-                  </button>
-                }
-              >
-                <div class="cards">
-                  <For each={annotations()}>
-                    {([k, v]) => (
-                      <div>
-                        <div class="mono faint" style={{ "font-size": "10.5px" }}>
-                          {k}
-                        </div>
-                        <div class="mono selectable" style={{ "word-break": "break-all", "white-space": "pre-wrap" }}>
-                          {v}
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            ) : undefined,
-          ],
+          ["Labels", labels],
+          ["Annotations", annotations().length ? annotationList : undefined],
         ]}
       />
     </Section>
@@ -168,9 +172,22 @@ function PortLink(props: { label: string; forward?: () => void }) {
 const isTcp = (p: K8sObject) => !p.protocol || p.protocol === "TCP";
 
 function ContainerCard(props: { c: K8sObject; status?: K8sObject; init?: boolean; sidecar?: boolean; forward?: (port: number) => void; cluster: string; namespace: string; load: RefLoader; pod?: K8sObject }) {
-  const st = () => containerState(props.status);
-  const last = () => props.status?.lastState?.terminated;
+  // The container's status as read: unchanged (see `useObject`), it does not make the list below anew when the pod
+  // changes elsewhere.
+  const status = createMemo(() => props.status);
+  const st = () => containerState(status());
+  const last = () => status()?.lastState?.terminated;
+  const lastText = () => {
+    const t = last();
+    const at = parseTime(t.finishedAt);
+    return `${t.reason ?? "Terminated"} (exit ${t.exitCode})${at ? ` · ${age(at, now())} ago` : ""}`;
+  };
   const res = () => props.c.resources ?? {};
+  // A card shows one container as read (one that changes gets a card of its own, see the `For`s). Its probes and
+  // environment are made once, if it has any, not in the list below (see `KV`): made anew, an environment starts over
+  // — "Show more" folded, Secrets hidden, values from ConfigMaps blank for a moment — and the details lose their place.
+  const probes = hasProbes(props.c) ? <Probes c={props.c} /> : undefined;
+  const env = hasEnv(props.c) ? <EnvList cluster={props.cluster} namespace={props.namespace} load={props.load} container={props.c} pod={props.pod} /> : undefined;
   return (
     <div class="card">
       <div class="card-head">
@@ -179,12 +196,12 @@ function ContainerCard(props: { c: K8sObject; status?: K8sObject; init?: boolean
         <Show when={props.init}>
           <span class="badge">{props.sidecar ? "sidecar" : "init"}</span>
         </Show>
-        <Show when={props.status}>
+        <Show when={status()}>
           <span class={`badge ${toneBadge(st().tone)}`}>{st().text}</span>
         </Show>
         <span class="grow" />
-        <Show when={(props.status?.restartCount ?? 0) > 0}>
-          <span class="badge warn">{props.status!.restartCount} restarts</span>
+        <Show when={(status()?.restartCount ?? 0) > 0}>
+          <span class="badge warn">{status()!.restartCount} restarts</span>
         </Show>
       </div>
       <div class="card-head" style={{ "margin-top": "-4px" }}>
@@ -195,7 +212,8 @@ function ContainerCard(props: { c: K8sObject; status?: K8sObject; init?: boolean
       <KV
         items={[
           ["State", st().detail],
-          ["Last termination", last() ? `${last().reason ?? "Terminated"} (exit ${last().exitCode})${last().finishedAt ? ` · ${age(parseTime(last().finishedAt)!, now())} ago` : ""}` : undefined],
+          // The clock is read inside the span: read by the list, it would make the list anew every second.
+          ["Last termination", last() ? <span>{lastText()}</span> : undefined],
           [
             "Ports",
             props.c.ports?.length ? (
@@ -209,8 +227,8 @@ function ContainerCard(props: { c: K8sObject; status?: K8sObject; init?: boolean
           ["Requests", res().requests ? Object.entries(res().requests).map(([k, v]) => `${k} ${v}`).join(" · ") : undefined],
           ["Limits", res().limits ? Object.entries(res().limits).map(([k, v]) => `${k} ${v}`).join(" · ") : undefined],
           ["Command", props.c.command || props.c.args ? <span class="mono">{[...(props.c.command ?? []), ...(props.c.args ?? [])].join(" ")}</span> : undefined],
-          ["Probes", hasProbes(props.c) ? <Probes c={props.c} /> : undefined],
-          ["Env", hasEnv(props.c) ? <EnvList cluster={props.cluster} namespace={props.namespace} load={props.load} container={props.c} pod={props.pod} /> : undefined],
+          ["Probes", probes],
+          ["Env", env],
         ]}
       />
     </div>

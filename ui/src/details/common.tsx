@@ -1,7 +1,8 @@
-import { type Accessor, createResource, createSignal, For, type JSX, Show } from "solid-js";
+import { type Accessor, createMemo, createResource, createSignal, For, Index, type JSX, Show } from "solid-js";
 import { Icon } from "../components/Icon";
 import { backend, type ObjectRef } from "../lib/backend";
 import { age, dateTime, parseTime } from "../lib/format";
+import { keepUnchanged } from "../lib/reactive";
 import { now, toast } from "../state/ui";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,13 +39,29 @@ export function createSafeResource<S, T>(source: () => S | false | null | undefi
   };
 }
 
-/** Full object for the details panel; re-fetched (from the engine's in-memory cache) when `rv` changes. */
+/**
+ * Full object for the details panel; read again (from the engine's in-memory cache) when `rv` changes. What did not
+ * change keeps its identity (a pod's spec when its status changed): what shows it is not made anew.
+ */
 export function useObject(target: Accessor<ObjectRef>, rv: Accessor<string>) {
-  const obj = createSafeResource(
-    () => ({ ...target(), rv: rv() }),
-    ({ rv: _rv, ...t }) => backend().getObject(t) as Promise<K8sObject>,
-  );
-  return { value: obj.value, loading: () => obj.loading() && !obj.value(), error: obj.error };
+  // Read for what the target and version say, not for the objects saying it: a row sent again as it was reads nothing.
+  // Without a version (an aggregated API may give none), only a new row can tell that the object changed.
+  const read = createMemo(() => ({ ...target(), rv: rv() }), undefined, { equals: (a, b) => a.rv !== "" && sameFields(a, b) });
+  const obj = createSafeResource(read, async ({ rv: _rv, ...t }): Promise<K8sObject> => {
+    const next = (await backend().getObject(t)) as K8sObject;
+    // Kept against what shows (`obj` is there once the read is back): only the last read asked for is shown, and
+    // nothing else is while it is out, so one that comes back late is dropped and changes nothing.
+    return keepUnchanged(obj.value(), next);
+  });
+  // The same object after a read with nothing new: what reads it does not run again.
+  const value = createMemo(() => obj.value());
+  return { value, loading: () => obj.loading() && !value(), error: obj.error };
+}
+
+/** The same fields with the same values, one level deep. */
+function sameFields(a: object, b: object): boolean {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k]);
 }
 
 export function Section(props: { title: JSX.Element; children: JSX.Element; actions?: JSX.Element }) {
@@ -62,17 +79,25 @@ export function Section(props: { title: JSX.Element; children: JSX.Element; acti
   );
 }
 
+/**
+ * Names and their values; a name without a value (undefined, null, "") is left out.
+ *
+ * `items` is made anew whenever anything read while making it changes, and each value in it with it. The rows stay —
+ * a value that is the same node stays where it is — but what is made in `items` is made anew: read the clock inside
+ * a value's own element, and make a value with a state of its own (a list folded under "Show more", a Secret shown)
+ * once, outside `items`.
+ */
 export function KV(props: { items: [string, JSX.Element | string | number | null | undefined][] }) {
   return (
     <dl class="kv">
-      <For each={props.items.filter(([, v]) => v !== undefined && v !== null && v !== "")}>
-        {([k, v]) => (
+      <Index each={props.items.filter(([, v]) => v !== undefined && v !== null && v !== "")}>
+        {(item) => (
           <>
-            <dt>{k}</dt>
-            <dd>{v}</dd>
+            <dt>{item()[0]}</dt>
+            <dd>{item()[1]}</dd>
           </>
         )}
-      </For>
+      </Index>
     </dl>
   );
 }

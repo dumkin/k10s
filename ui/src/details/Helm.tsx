@@ -65,8 +65,9 @@ export function ReleaseTab(props: DetailProps) {
                 ["Chart", <span class="mono">{r().chart}</span>],
                 ["App version", r().appVersion],
                 ["Namespace", r().namespace],
-                ["Installed", r().firstDeployed ? `${dateTime(r().firstDeployed!)} · ${age(r().firstDeployed!, now())} ago` : undefined],
-                ["Updated", r().lastDeployed ? `${dateTime(r().lastDeployed!)} · ${age(r().lastDeployed!, now())} ago` : undefined],
+                // The clock is read inside the spans: read by the list, it would make the list anew every second.
+                ["Installed", r().firstDeployed ? <span>{`${dateTime(r().firstDeployed!)} · ${age(r().firstDeployed!, now())} ago`}</span> : undefined],
+                ["Updated", r().lastDeployed ? <span>{`${dateTime(r().lastDeployed!)} · ${age(r().lastDeployed!, now())} ago`}</span> : undefined],
                 ["Description", r().description],
                 ["Revisions kept", r().history.length],
               ]}
