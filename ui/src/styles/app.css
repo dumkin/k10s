@@ -1860,6 +1860,9 @@ textarea::placeholder {
 .menu {
   min-width: 200px;
   padding: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .menu .opt { min-height: 28px; transition: background var(--dur-fast); }
 .menu .opt .kbd { margin-left: auto; }
