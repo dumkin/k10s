@@ -186,7 +186,7 @@ Releases aren't notarized by Apple. Open **System Settings → Privacy & Securit
 ### Windows
 
 ```powershell
-winget install Dumkin.k10s
+winget install dumkin.k10s
 ```
 
 Or download `k10s-<version>-windows-x64-setup.exe` (or the `.msi`) from [Releases](../../releases/latest). The installer isn't code-signed: if SmartScreen says "Windows protected your PC", click **More info → Run anyway**.

@@ -186,7 +186,7 @@ brew install --cask dumkin/tap/k10s
 ### Windows
 
 ```powershell
-winget install Dumkin.k10s
+winget install dumkin.k10s
 ```
 
 Или скачайте `k10s-<версия>-windows-x64-setup.exe` (или `.msi`) со страницы [релизов](../../releases/latest). Установщик не подписан: если SmartScreen пишет «Система Windows защитила ваш компьютер», нажмите **Подробнее → Выполнить в любом случае**.

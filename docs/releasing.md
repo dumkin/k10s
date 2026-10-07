@@ -19,7 +19,7 @@ Every file of a release is named `k10s-<version>-<os>-<arch>`, so that the relea
 - Settings → General: enable Issues; Discussions if you want them.
 - Settings → Code security: enable **private vulnerability reporting** (SECURITY.md sends reports there), Dependabot alerts and security updates.
 - Settings → Rules: protect `main` and require the **CI** checks and the **CLA** status before merging.
-- The repository is `dumkin/k10s`. The Homebrew tap (`dumkin/homebrew-tap`) and the update feed of every release build follow from its name; the winget identifier, `Dumkin.k10s`, is set in `publish.yml`. Moving the repository later works through GitHub's redirects, as long as no new repository takes the old name.
+- The repository is `dumkin/k10s`. The Homebrew tap (`dumkin/homebrew-tap`) and the update feed of every release build follow from its name; the winget identifier, `dumkin.k10s`, is set in `publish.yml`. Moving the repository later works through GitHub's redirects, as long as no new repository takes the old name.
 
 ### 2. The update signing key (required)
 
@@ -87,7 +87,7 @@ From the next published release on, the Publish workflow writes `Casks/k10s.rb` 
 ### 7. winget (optional)
 
 1. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) under the same owner.
-2. Submit the first version by hand, once there is a published release: `wingetcreate new <URL of k10s-X.Y.Z-windows-x64-setup.exe>` (or `komac new`), with the identifier `Dumkin.k10s`, publisher Danil Dumkin and moniker `k10s`.
+2. Submit the first version by hand, once there is a published release: `wingetcreate new <URL of k10s-X.Y.Z-windows-x64-setup.exe>` (or `komac new`), with the identifier `dumkin.k10s`, publisher Danil Dumkin and moniker `k10s`.
 3. Create a **classic** token with the `public_repo` scope (winget tooling doesn't take fine-grained ones) and save it as `WINGET_TOKEN`.
 
 After that, every published release opens a pull request to winget-pkgs.

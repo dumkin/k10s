@@ -76,7 +76,7 @@ jobs:
       - uses: vedantmgoyal9/winget-releaser@v2
         if: env.WINGET_TOKEN != ''
         with:
-          identifier: Dumkin.k10s
+          identifier: dumkin.k10s
           release-tag: ${{ env.TAG }}
           installers-regex: '-windows-x64-setup\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}
