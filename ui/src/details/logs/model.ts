@@ -98,10 +98,10 @@ export class Structures {
 const BEHIND_MS = 5000;
 /** A source nothing came from for this long says how long ago its newest line was written. */
 const QUIET_MS = 30_000;
-/** The lines that came this recently make the rate, and a source is as late as the freshest of its lines among them… */
-const WINDOW_MS = 10_000;
-/** …and the view as late as the freshest of all that came this recently. */
-const RECENT_MS = 3000;
+/** The seconds the rate is of (the whole ones before this one); a source is as late as the freshest of its lines in as many… */
+const WINDOW_S = 10;
+/** …and the view as late as the freshest of all in the last few. */
+const RECENT_S = 3;
 /** Lines written up to this long before their stream was asked for count as written after it (the request's own way). */
 const ASKED_SLACK_MS = 2000;
 
@@ -111,15 +111,21 @@ export type Lag = { behind: number } | { quiet: number };
 /** "45s behind". */
 export const behindText = (ms: number) => `${humanDuration(ms / 1000)} behind`;
 
-/** How the lines of a stream come (see `Arrivals`). */
-export interface Meter {
-  /** Lines a second that came in the last 10 s, of those written since their streams were asked for; null when none came. */
+/** How the lines of a view come (see `Arrivals.view`). */
+export interface ViewMeter {
+  /** Lines a second, of the last 10 whole seconds, written since their streams were asked for; null when none came. */
   rate: number | null;
   /** How long after they were written the freshest lines came (ms), when late enough to tell. */
   behind: number | null;
-  /** Each source's lag, by id; those neither late nor quiet are left out. */
-  sources: Record<number, Lag>;
 }
+
+/**
+ * What came in each of the last seconds: slot `second % SLOTS` holds that second's (`secs`), a slot holding an older
+ * one is from a round before. A fixed few numbers, however many lines come: nothing to allocate or drop as they do.
+ */
+const SLOTS = WINDOW_S + 1;
+const slots = () => new Float64Array(SLOTS).fill(-Infinity);
+const toSecond = (ms: number) => Math.floor(ms / 1000) * 1000;
 
 /** A source's stream, as its lines come. */
 interface Stream {
@@ -130,11 +136,14 @@ interface Stream {
   /** When its newest line was written, and when lines of it last came. */
   newest: number;
   came: number;
-  /** How late its lines came: [when, ms, written since it was asked for], for the newest of its lines in each batch. */
-  late: [number, number, boolean][];
-  /** The batch taken in last, and the newest of its lines in it. */
+  /** How late its lines came in each second (see `SLOTS`): the least of those written since it was asked for, of the older ones. */
+  secs: Float64Array;
+  late: Float64Array;
+  old: Float64Array;
+  /** The batch taken in last, the newest of its lines in it, and from when they count as written since it was asked for. */
   batch: number;
   batchNewest: number;
+  liveFrom: number;
 }
 
 /**
@@ -155,14 +164,37 @@ export class Arrivals {
   private floor = Infinity;
   /** The sources streamed now, by id. */
   private streams: (Stream | undefined)[] = [];
-  /** Lines written since their streams were asked for, as they came: [when, how many]. */
-  private live: [number, number][] = [];
+  /** In each second (see `SLOTS`): the lines written since their streams were asked for, and how late the freshest came. */
+  private secs = slots();
+  private live = new Float64Array(SLOTS);
+  private fresh = new Float64Array(SLOTS);
   private batches = 0;
+  /** (The sources of the batch being taken in.) */
+  private touched: Stream[] = [];
+  /** The sources whose lines came, by id (also those no longer streamed). */
+  private writers: boolean[] = [];
+
+  /** Whether lines of a source came (a container that comes back "runs again", else it "started"). */
+  wrote(i: number): boolean {
+    return this.writers[i] === true;
+  }
 
   /** The sources streamed from `at` on: those new to it were asked for then, those it no longer has are forgotten. */
   ask(ids: readonly number[], at: number) {
     const streams: (Stream | undefined)[] = [];
-    for (const i of ids) streams[i] = this.streams[i] ?? { asked: at, start: null, newest: -Infinity, came: -Infinity, late: [], batch: 0, batchNewest: -Infinity };
+    for (const i of ids)
+      streams[i] = this.streams[i] ?? {
+        asked: at,
+        start: null,
+        newest: -Infinity,
+        came: -Infinity,
+        secs: slots(),
+        late: new Float64Array(SLOTS),
+        old: new Float64Array(SLOTS),
+        batch: 0,
+        batchNewest: -Infinity,
+        liveFrom: at,
+      };
     this.streams = streams;
   }
 
@@ -176,76 +208,106 @@ export class Arrivals {
 
   /** A batch came `now`. */
   add(batch: readonly LogLine[], now: number) {
-    let newest = -Infinity;
-    for (const l of batch) if (l[1] !== null && l[1] > newest) newest = l[1];
-    if (newest > -Infinity) this.floor = Math.min(this.floor, now - newest);
+    // One pass over the lines. (What counts as written since a stream was asked for takes the floor as it was before the
+    // batch: the batch changes it only once a line written lately came, or a clock ahead.)
     const ahead = Math.min(0, this.floor);
     const n = ++this.batches;
-    const touched: Stream[] = [];
+    const touched = this.touched;
+    let newest = -Infinity;
     let live = 0;
     for (const l of batch) {
+      const ts = l[1];
+      if (ts !== null && ts > newest) newest = ts;
       const s = this.streams[l[0]];
-      // (The last lines of a stream stopped.)
-      if (!s) continue;
+      if (!s) {
+        // (The last lines of a stream stopped.)
+        this.writers[l[0]] = true;
+        continue;
+      }
       if (s.batch !== n) {
         s.batch = n;
         s.batchNewest = -Infinity;
+        s.liveFrom = s.asked - ASKED_SLACK_MS - ahead;
+        this.writers[l[0]] = true;
         touched.push(s);
       }
-      const ts = l[1];
       if (ts === null) live++;
       else {
         if (ts > s.batchNewest) s.batchNewest = ts;
-        if (ts + ahead >= s.asked - ASKED_SLACK_MS) live++;
+        if (ts >= s.liveFrom) live++;
       }
     }
-    if (live) this.live.push([now, live]);
+    if (newest > -Infinity) this.floor = Math.min(this.floor, now - newest);
+    const sec = Math.floor(now / 1000);
+    const k = sec % SLOTS;
+    if (this.secs[k] !== sec) {
+      this.secs[k] = sec;
+      this.live[k] = 0;
+      this.fresh[k] = Infinity;
+    }
+    this.live[k] += live;
     for (const s of touched) {
       s.came = now;
       const start = (s.start ??= now);
       const ts = s.batchNewest;
       if (ts === -Infinity) continue;
       s.newest = Math.max(s.newest, ts);
-      const written = ts + this.floor >= s.asked - ASKED_SLACK_MS;
-      s.late.push([now, Math.max(0, now - (written ? ts + this.floor : start)), written]);
+      if (s.secs[k] !== sec) {
+        s.secs[k] = sec;
+        s.late[k] = Infinity;
+        s.old[k] = Infinity;
+      }
+      if (ts + this.floor >= s.asked - ASKED_SLACK_MS) {
+        const lag = Math.max(0, now - ts - this.floor);
+        if (lag < s.late[k]) s.late[k] = lag;
+        if (lag < this.fresh[k]) this.fresh[k] = lag;
+      } else {
+        const lag = Math.max(0, now - start);
+        if (lag < s.old[k]) s.old[k] = lag;
+      }
     }
+    touched.length = 0;
   }
 
-  /** How lines come, at `now`. */
-  at(now: number): Meter {
-    const since = now - WINDOW_MS;
-    dropUntil(this.live, since);
+  /** How the view's lines come, at `now` (what the meter shows every second: a few numbers, however many sources). */
+  view(now: number): ViewMeter {
+    const sec = Math.floor(now / 1000);
     let lines = 0;
-    for (const [, k] of this.live) lines += k;
     let freshest = Infinity;
-    const sources: Record<number, Lag> = {};
-    this.streams.forEach((s, i) => {
-      if (!s || s.came === -Infinity) return;
-      dropUntil(s.late, since);
+    for (let k = 0; k < SLOTS; k++) {
+      const age = sec - this.secs[k];
+      if (age >= 1 && age <= WINDOW_S) lines += this.live[k];
+      if (age >= 0 && age < RECENT_S && this.fresh[k] < freshest) freshest = this.fresh[k];
+    }
+    return { rate: lines ? lines / WINDOW_S : null, behind: freshest >= BEHIND_MS && freshest < Infinity ? freshest : null };
+  }
+
+  /**
+   * Each source's lag at `now`, by id; those neither late nor quiet are left out. To the second, as it is shown: a lag
+   * that does not change what is shown does not change.
+   */
+  sources(now: number): Record<number, Lag> {
+    const sec = Math.floor(now / 1000);
+    const out: Record<number, Lag> = {};
+    for (let i = 0; i < this.streams.length; i++) {
+      const s = this.streams[i];
+      if (!s || s.came === -Infinity) continue;
       // The freshest of its lines that came lately (a batch that came late once is no lag): of those written since its
       // stream was asked for, else of the old ones that keep coming.
       let late = Infinity;
       let old = Infinity;
-      for (const [at, ms, written] of s.late) {
-        if (!written) old = Math.min(old, ms);
-        else {
-          late = Math.min(late, ms);
-          if (at > now - RECENT_MS) freshest = Math.min(freshest, ms);
-        }
+      for (let k = 0; k < SLOTS; k++) {
+        const age = sec - s.secs[k];
+        if (age < 0 || age >= WINDOW_S) continue;
+        if (s.late[k] < late) late = s.late[k];
+        if (s.old[k] < old) old = s.old[k];
       }
       if (late === Infinity) late = old;
-      if (late >= BEHIND_MS && late < Infinity) sources[i] = { behind: late };
-      else if (now - s.came >= QUIET_MS && s.newest > -Infinity) sources[i] = { quiet: now - s.newest - Math.min(0, this.floor) };
-    });
-    return { rate: lines ? lines / (WINDOW_MS / 1000) : null, behind: freshest >= BEHIND_MS && freshest < Infinity ? freshest : null, sources };
+      if (late >= BEHIND_MS && late < Infinity) out[i] = { behind: toSecond(late) };
+      else if (now - s.came >= QUIET_MS && s.newest > -Infinity) out[i] = { quiet: toSecond(now - s.newest - Math.min(0, this.floor)) };
+    }
+    return out;
   }
-}
-
-/** Drops the entries (in the order they came) that came by `until`. */
-function dropUntil<T extends readonly [number, ...unknown[]]>(list: T[], until: number) {
-  let k = 0;
-  while (k < list.length && list[k][0] <= until) k++;
-  if (k) list.splice(0, k);
 }
 
 export interface FieldStat {

@@ -25,14 +25,15 @@ describe("Arrivals", () => {
   // Streams asked for at T.
   const T = 1_700_000_000_000;
   const batch = (...l: [number, number][]) => l.map(([i, ts]): [number, number, string] => [i, ts, "line"]);
-  const lags = (a: Arrivals, now: number) => a.at(now).sources;
+  const lags = (a: Arrivals, now: number) => a.sources(now);
+  const meter = (a: Arrivals, now: number) => ({ ...a.view(now), sources: a.sources(now) });
 
   it("says whose lines come late, by the freshest of those that came lately", () => {
     const a = new Arrivals();
     a.ask([0, 1], T);
     // For a minute, source 0's lines come as they are written, source 1's 45 s later.
     for (let s = 1; s <= 60; s++) a.add(batch([0, T + s * 1000], [1, T + s * 1000 - 45_000]), T + s * 1000);
-    expect(a.at(T + 60_000)).toEqual({ rate: 2, behind: null, sources: { 1: { behind: 45_000 } } });
+    expect(meter(a, T + 60_000)).toEqual({ rate: 2, behind: null, sources: { 1: { behind: 45_000 } } });
     // Source 1 catches up: it is not late from then on. A batch of source 0 that comes late once is no lag.
     a.add(batch([0, T + 61_000], [1, T + 61_000]), T + 61_000);
     a.add(batch([0, T + 32_000]), T + 62_000);
@@ -45,7 +46,7 @@ describe("Arrivals", () => {
     a.add(batch([0, T], [1, T]), T);
     // The app (or the cluster) falls behind: every line comes 8 s after it was written.
     for (let s = 1; s <= 20; s++) a.add(batch([0, T + s * 1000 - 8000], [1, T + s * 1000 - 8000]), T + s * 1000);
-    expect(a.at(T + 20_000)).toEqual({ rate: 2, behind: 8000, sources: { 0: { behind: 8000 }, 1: { behind: 8000 } } });
+    expect(meter(a, T + 20_000)).toEqual({ rate: 2, behind: 8000, sources: { 0: { behind: 8000 }, 1: { behind: 8000 } } });
   });
 
   it("does not count the history read first as late, nor as written lately; old lines that keep coming are late", () => {
@@ -53,7 +54,7 @@ describe("Arrivals", () => {
     a.ask([0, 1], T);
     // Both histories come at once; source 0 last wrote an hour ago.
     a.add(batch([0, T - 3_600_000], [1, T]), T);
-    expect(a.at(T)).toEqual({ rate: 0.1, behind: null, sources: {} });
+    expect(meter(a, T + 1000)).toEqual({ rate: 0.1, behind: null, sources: {} });
     // Source 1's lines keep coming, 10 minutes after they were written: three minutes on, it is as late at least as the
     // freshest of them that came in the last 10 s.
     for (let s = 1; s <= 180; s++) a.add(batch([1, T + s * 1000 - 600_000]), T + s * 1000);
@@ -74,7 +75,7 @@ describe("Arrivals", () => {
     a.ask([0, 1], T);
     // Only histories come: one source last wrote 3 h ago, the other 2 h ago. Neither counts as written lately.
     a.add(batch([0, T - 3 * 3_600_000], [1, T - 2 * 3_600_000]), T);
-    expect(a.at(T + 1000)).toEqual({ rate: null, behind: null, sources: {} });
+    expect(meter(a, T + 1000)).toEqual({ rate: null, behind: null, sources: {} });
     expect(lags(a, T + 29_999)).toEqual({});
     expect(lags(a, T + 30_000)).toEqual({ 0: { quiet: 3 * 3_600_000 + 30_000 }, 1: { quiet: 2 * 3_600_000 + 30_000 } });
   });
@@ -99,6 +100,15 @@ describe("Arrivals", () => {
     a.ask([0, 1], T + 600_000);
     a.add(batch([1, T + 300_000]), T + 600_100);
     expect(lags(a, T + 600_100)[1]).toBeUndefined();
+  });
+
+  it("gives each source's lag to the second, as it is shown", () => {
+    const a = new Arrivals();
+    a.ask([0, 1], T);
+    a.add(batch([0, T], [1, T]), T);
+    // Source 1's lines come 45.4 s after they were written; source 0 stops.
+    for (let s = 1; s <= 50; s++) a.add(batch([1, T + s * 1000 - 45_400]), T + s * 1000);
+    expect(lags(a, T + 50_700)).toEqual({ 0: { quiet: 50_000 }, 1: { behind: 45_000 } });
   });
 
   it("tells how long ago a source's newest line was written once nothing came from it for a while", () => {

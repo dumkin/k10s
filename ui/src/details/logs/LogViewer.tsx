@@ -266,11 +266,13 @@ export function LogViewer(props: LogViewerProps) {
   const [behind, setBehind] = createSignal<number | null>(null);
   const [lags, setLags] = createStore<Record<number, Lag>>({});
   const meter = setInterval(() => {
-    const m = arrivals.at(Date.now());
+    const now = Date.now();
+    const v = arrivals.view(now);
     batch(() => {
-      setRate(m.rate);
-      setBehind(m.behind);
-      setLags(reconcile(m.sources));
+      setRate(v.rate);
+      setBehind(v.behind);
+      // Each source's, while Sources shows them.
+      if (sourcesAt()) setLags(reconcile(arrivals.sources(now)));
     });
   }, 1000);
   onCleanup(() => clearInterval(meter));
@@ -337,8 +339,6 @@ export function LogViewer(props: LogViewerProps) {
       const logSpec: LogSpec = { targets: srcs.assign(untrack(selection).targets), follow: !s.previous, tailLines: s.tail, sinceSeconds: s.since, previous: s.previous, label: untrack(props.label) };
       // The state each target was last in: changes after the first become markers in the timeline.
       const last = new Map<number, LogState>();
-      /** Targets that wrote lines already (a container that comes back "runs again", else it "started"). */
-      const wrote = new Set<number>();
       const restartsOf = (src: Source) => untrack(props.pods).find((p) => podKeyOf(p) === podKeyOf(src))?.restarts;
       const early = (earlier = new Earlier({
         buffer: buf,
@@ -453,14 +453,11 @@ export function LogViewer(props: LogViewerProps) {
           // What a stream that starts (again) reads first was written before: catching up is not being late.
           if (m.state === "streaming" && before !== "streaming") arr.restart(m.i, Date.now());
           const restarted = m.state === "streaming" && (before === "waiting" || before === "ended");
-          early.streamState(m.i, m.state, restarted && wrote.has(m.i));
-          if ((m.message && m.state !== "reconnecting") || restarted) commit(() => buf.mark(m.i, restarted ? (wrote.has(m.i) ? "running again" : "started") : m.message!, markerLevel(m.state, m.message ?? "")));
+          early.streamState(m.i, m.state, restarted && arr.wrote(m.i));
+          if ((m.message && m.state !== "reconnecting") || restarted) commit(() => buf.mark(m.i, restarted ? (arr.wrote(m.i) ? "running again" : "started") : m.message!, markerLevel(m.state, m.message ?? "")));
           return;
         }
-        for (const l of m.l) {
-          wrote.add(l[0]);
-          waitingBytes += l[2].length;
-        }
+        for (const l of m.l) waitingBytes += l[2].length;
         waiting.push(m.l);
         early.seen(m.l);
         arr.add(m.l, Date.now());
@@ -849,6 +846,12 @@ export function LogViewer(props: LogViewerProps) {
     });
   const [menuAt, setMenuAt] = createSignal<HTMLElement>();
   const [sourcesAt, setSourcesAt] = createSignal<HTMLElement>();
+  // Sources shows each source's lag as it opens (and the meter keeps it up while it is open).
+  createEffect(
+    on(sourcesAt, (at) => {
+      if (at) setLags(reconcile(arrivals.sources(Date.now())));
+    }),
+  );
   const [fieldsAt, setFieldsAt] = createSignal<HTMLElement>();
   // Whether there are structured lines (once seen, until the stream starts over).
   let seenStructured = false;
