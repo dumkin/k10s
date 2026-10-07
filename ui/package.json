@@ -1,7 +1,7 @@
 {
   "name": "k10s",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Multi-cluster Kubernetes desktop client",
   "license": "AGPL-3.0-only",
   "author": "Danil Dumkin",
