@@ -9,6 +9,7 @@ import { clockOf, dayOf, gapOf, stampOf } from "../../lib/logs/format";
 import { type Piece, slicePieces } from "../../lib/logs/highlight";
 import { type FieldValue, jsonOf, LEVEL_NAME, LEVEL_TAG, TRACE_KEYS } from "../../lib/logs/parse";
 import { fieldTerm } from "../../lib/logs/query";
+import { copyText } from "../../state/ui";
 import { indexAtPos, type Line, plainOf } from "../logBuffer";
 import { blocksOf, textEnd, WHOLE } from "./hwindow";
 import type { LogCtx } from "./LogViewer";
@@ -755,6 +756,11 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
     if (!window.getSelection()?.isCollapsed) return;
     setValueMenu({ x: e.clientX, y: e.clientY + 8, key, value });
   };
+  /** Copies a field's value as it is (a string unquoted). */
+  const copyValue = (key: string, value: FieldValue) => {
+    const text = value === null ? "null" : String(value);
+    void copyText(text, `Copied ${key}`, text);
+  };
   const clickLine = (l: Line, e: MouseEvent) => {
     // Selecting text is not clicking a line.
     if (!window.getSelection()?.isCollapsed) return;
@@ -1015,7 +1021,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
                     <button class="btn sm ghost icon" classList={{ on: pinned().includes(key) }} title={pinned().includes(key) ? `Stop showing ${key} as a column` : `Show ${key} as a column`} onClick={() => togglePinned(key)}>
                       <Icon name="columns" size={11} />
                     </button>
-                    <button class="btn sm ghost icon" title="Copy the value" onClick={() => void navigator.clipboard.writeText(value === null ? "null" : String(value))}>
+                    <button class="btn sm ghost icon" title="Copy the value" onClick={() => copyValue(key, value)}>
                       <Icon name="copy" size={11} />
                     </button>
                   </span>
@@ -1034,7 +1040,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
             <Icon name="copy" size={11} /> Copy
           </button>
           <Show when={json()}>
-            <button class="btn sm ghost" onClick={() => void navigator.clipboard.writeText(JSON.stringify(json(), null, 2))}>
+            <button class="btn sm ghost" onClick={() => void copyText(JSON.stringify(json(), null, 2), "Copied JSON")}>
               <Icon name="braces" size={11} /> Copy JSON
             </button>
           </Show>
@@ -1202,7 +1208,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
                 <Icon name="columns" size={13} />
                 <span>{pinned().includes(m.key) ? `Remove the ${m.key} column` : `Show ${m.key} as a column`}</span>
               </button>
-              <button class="opt" role="menuitem" onClick={() => (setValueMenu(null), void navigator.clipboard.writeText(m.value === null ? "null" : String(m.value)))}>
+              <button class="opt" role="menuitem" onClick={() => (setValueMenu(null), copyValue(m.key, m.value))}>
                 <Icon name="copy" size={13} />
                 <span>Copy the value</span>
               </button>

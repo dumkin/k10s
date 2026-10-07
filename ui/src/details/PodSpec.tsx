@@ -18,7 +18,7 @@ import {
   tolerationText,
 } from "../lib/podspec";
 import { reveal } from "../state/nav";
-import { toast } from "../state/ui";
+import { copyText } from "../state/ui";
 import { type K8sObject, KV, Labels, Section } from "./common";
 
 // What a pod spec says, readably: a container's probes and environment (values from ConfigMaps and Secrets filled in,
@@ -357,12 +357,11 @@ export function EnvList(props: { cluster: string; namespace: string; load: RefLo
   const [all, setAll] = createSignal(false);
   const shown = () => (all() ? env().vars : env().vars.slice(0, ENV_SHOWN));
   const overridden = createMemo(() => new Set(env().vars.map((v) => v.name)));
-  const copy = async () => {
+  const copy = () => {
     const text = env()
       .vars.map((v) => `${v.name}=${values().get(v.name) ?? (v.source.kind === "value" ? v.value : `<${v.source.kind === "configMap" || v.source.kind === "secret" ? `${v.source.kind} ${v.source.name}/${v.source.key}` : v.source.kind}>`)}`)
       .join("\n");
-    await navigator.clipboard.writeText(text);
-    toast("info", "Copied to clipboard", "Secret values are left out.");
+    return copyText(text, "Copied to clipboard", "Secret values are left out.");
   };
   return (
     <div class="env">

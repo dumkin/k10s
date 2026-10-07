@@ -525,3 +525,27 @@ describe("permissions (RBAC)", () => {
     expect(asked).toEqual(expect.arrayContaining(["create pods/exec", "create pods/attach", "create pods/portforward", "get pods/log", "patch pods/ephemeralcontainers", "delete pods/"]));
   });
 });
+
+describe("copy name", () => {
+  let copied: string[];
+
+  beforeEach(() => {
+    copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  });
+  afterEach(() => Reflect.deleteProperty(navigator, "clipboard"));
+
+  it("copies a name per line and says which, as ⌥-click on a name does", async () => {
+    await run("copy-name", ctxOf([deployment("prod-eu-z1", "payments-api", 3)]));
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied name", detail: "payments-api" });
+    await run("copy-name", ctxOf([deployment("prod-eu-z1", "payments-api", 3), deployment("prod-eu-z2", "payments-api", 3), deployment("prod-eu-z2", "ledger", 1)]));
+    expect(copied).toEqual(["payments-api", "payments-api\npayments-api\nledger"]);
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied 3 names", detail: "payments-api, payments-api, ledger" });
+  });
+
+  it("says when the clipboard refuses, and why, instead of failing", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new DOMException("The request is not allowed by the user agent or the platform in the current context.", "NotAllowedError")) } });
+    await expect(run("copy-name", ctxOf([deployment("prod-eu-z1", "payments-api", 3)]))).resolves.toBeUndefined();
+    expect(toasts().at(-1)).toMatchObject({ kind: "error", title: "Could not copy", detail: "The request is not allowed by the user agent or the platform in the current context." });
+  });
+});

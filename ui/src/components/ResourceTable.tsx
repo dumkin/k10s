@@ -1,5 +1,4 @@
 import { type Accessor, batch, createEffect, createMemo, createSignal, For, Index, Match, on, onCleanup, onMount, Show, type Signal, Switch, untrack } from "solid-js";
-import { errorMessage } from "../lib/backend";
 import { isTyping } from "../lib/hotkeys";
 import { errorTitle, isAuthFailure, isAuthFailureMessage, isError, isForbidden, isValidNamespace, normalizeNamespace } from "../lib/k8s";
 import { splitterDrag } from "../lib/splitter";
@@ -27,7 +26,7 @@ import {
   toggleMark,
 } from "../state/nav";
 import { cellOf, cellText, previewColumnWidth, setColumnWidth, sort, type TableColumn, type TableModel, toggleSort } from "../state/table";
-import { dialog, now, paletteOpen, pickerOpen, toast } from "../state/ui";
+import { copyText, dialog, now, paletteOpen, pickerOpen } from "../state/ui";
 import type { FeedState, UIRow, ViewFeed } from "../state/view";
 import { Icon } from "./Icon";
 
@@ -35,18 +34,9 @@ export const ROW_H = 28;
 const HEAD_H = 31;
 const OVERSCAN = 6;
 const DOT_COL = 26;
-/** Characters of copied text a toast shows (the clipboard gets all of it): labels and messages run to hundreds. */
-const SHOWN_COPY = 120;
 
 /** ⌥ alone, with no other modifier: a click on a cell copies it. With ⇧, ⌘ or Ctrl (AltGr too) it's another click. */
 const copies = (e: MouseEvent | KeyboardEvent) => e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey;
-
-/** `text` cut to `max` characters, "…" last — whole characters: an emoji's two halves stay together. */
-function shortened(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const chars = Array.from(text);
-  return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
-}
 
 export interface TableHandle {
   scrollToIndex(i: number): void;
@@ -153,10 +143,8 @@ export function ResourceTable(props: {
     const at = `${row.key}\0${id}`;
     if (!col || !text || run.copied === at) return;
     run.copied = at;
-    void navigator.clipboard.writeText(text).then(
-      () => toast("success", `Copied ${col.title}`, shortened(text, SHOWN_COPY)),
-      (err) => toast("error", "Could not copy", errorMessage(err)),
-    );
+    // "Copied name", as Copy name (`c`) says it, not the column's "Name".
+    void copyText(text, col.special === "name" ? "Copied name" : `Copied ${col.title}`, text);
   };
 
   const onMouseDown = (e: MouseEvent) => {

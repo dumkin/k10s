@@ -4,7 +4,7 @@ import { bytes, plural } from "../lib/format";
 import { keyLabel } from "../lib/hotkeys";
 import { clusterColor, shortName } from "../state/clusters";
 import { forwards, forwardTarget, isPinned, openForward, startForward, startPinned, stopForward, stoppedPins, togglePin } from "../state/forwards";
-import { toast } from "../state/ui";
+import { copyText } from "../state/ui";
 import { registerDockPane } from "./Dock";
 import { Icon } from "./Icon";
 
@@ -97,14 +97,7 @@ function RunningRow(props: { f: ForwardInfo }) {
         <button class="btn sm ghost icon" title={`Open ${url()} in the browser`} onClick={() => void openForward(f())}>
           <Icon name="external" size={12} />
         </button>
-        <button
-          class="btn sm ghost icon"
-          title="Copy the URL"
-          onClick={() => {
-            void navigator.clipboard.writeText(url());
-            toast("info", "Copied to clipboard", url());
-          }}
-        >
+        <button class="btn sm ghost icon" title="Copy the URL" onClick={() => void copyText(url(), "Copied to clipboard", url())}>
           <Icon name="copy" size={12} />
         </button>
         <button class="btn sm ghost icon" classList={{ on: isPinned(f().spec) }} title={isPinned(f().spec) ? "Unpin" : "Pin: keep it here to start again later"} onClick={() => togglePin(f().spec, f().localPort)}>

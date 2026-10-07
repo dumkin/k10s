@@ -235,6 +235,39 @@ export function busyToast(title: string, detail?: string): () => void {
   return () => dismissToast(id);
 }
 
+/** Characters of copied text a toast shows (the clipboard gets all of it): labels and messages run to hundreds. */
+const SHOWN_COPY = 120;
+
+/** `text` cut to `max` characters, "…" last — whole characters: an emoji's two halves stay together. */
+function shortened(text: string, max: number): string {
+  if (text.length <= max) return text;
+  // Up to the character past `max`, not further: the text may be the names of 50,000 rows.
+  let chars = 0;
+  let at = 0;
+  let cut = 0;
+  for (const ch of text) {
+    if (++chars > max) return `${text.slice(0, cut)}…`;
+    // The last character's place, which "…" takes if there are more.
+    if (chars === max) cut = at;
+    at += ch.length;
+  }
+  return text;
+}
+
+/**
+ * Copies `text` and says so: `title`, over `detail` (what was copied, say: at most 120 characters of it). A clipboard
+ * that refuses it (no permission, the window not focused) is said instead, with why: the promise never rejects.
+ */
+export async function copyText(text: string, title: string, detail?: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    toast("error", "Could not copy", errorMessage(e));
+    return;
+  }
+  toast("success", title, detail === undefined ? undefined : shortened(detail, SHOWN_COPY));
+}
+
 function schedule(id: number, ms: number) {
   clearTimer(id);
   timers.set(id, { handle: setTimeout(() => dismissToast(id), ms), due: Date.now() + ms, left: ms });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const engine = vi.hoisted(() => ({
   settings: { readOnly: false, feedIdleTtlSecs: 180 },
@@ -13,7 +13,7 @@ const engine = vi.hoisted(() => ({
 }));
 vi.mock("../lib/backend", async (importOriginal) => ({ ...(await importOriginal<typeof import("../lib/backend")>()), backend: () => engine }));
 
-const { busyToast, loadSettings, readOnly, setReadOnly, setUiZoom, toast, toasts, dismissToast, uiZoom, zoomBy, ZOOM_STEPS } = await import("./ui");
+const { busyToast, copyText, loadSettings, readOnly, setReadOnly, setUiZoom, toast, toasts, dismissToast, uiZoom, zoomBy, ZOOM_STEPS } = await import("./ui");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -89,6 +89,38 @@ describe("toasts", () => {
     expect(toasts().map((t) => t.title)).toEqual(["failed 1", "failed 2", "failed 3", "failed 4", "Deleting web-0…", "failed 5"]);
     done();
     expect(toasts().map((t) => t.title)).toEqual(["failed 1", "failed 2", "failed 3", "failed 4", "failed 5"]);
+  });
+});
+
+describe("copying", () => {
+  const clipboard = (writeText: (text: string) => Promise<void>) => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  afterEach(() => Reflect.deleteProperty(navigator, "clipboard"));
+
+  it("says what it copied, at most 120 characters of it, whole ones: the clipboard gets all of it", async () => {
+    const copied: string[] = [];
+    clipboard(async (text) => void copied.push(text));
+    const long = `${"a".repeat(118)}🚀${"b".repeat(10)}`;
+    await copyText(long, "Copied name", long);
+    expect(copied).toEqual([long]);
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied name", detail: `${"a".repeat(118)}🚀…` });
+    // 120 characters in 240 UTF-16 units: all of them.
+    await copyText("web-0", "Copied name", "🚀".repeat(120));
+    expect(toasts().at(-1)?.detail).toBe("🚀".repeat(120));
+    await copyText("apiVersion: v1", "Copied to clipboard");
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied to clipboard", detail: undefined });
+  });
+
+  it("says when the clipboard refuses, and why, instead of failing", async () => {
+    clipboard(() => Promise.reject(new DOMException("The request is not allowed by the user agent or the platform in the current context.", "NotAllowedError")));
+    await expect(copyText("web-0", "Copied name", "web-0")).resolves.toBeUndefined();
+    expect(toasts().at(-1)).toMatchObject({ kind: "error", title: "Could not copy", detail: "The request is not allowed by the user agent or the platform in the current context." });
+    // No clipboard at all (a page that is not a secure context).
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    await expect(copyText("web-0", "Copied name", "web-0")).resolves.toBeUndefined();
+    expect(toasts().map((t) => [t.kind, t.title])).toEqual([
+      ["error", "Could not copy"],
+      ["error", "Could not copy"],
+    ]);
   });
 });
 

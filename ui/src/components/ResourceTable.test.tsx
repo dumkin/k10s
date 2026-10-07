@@ -136,6 +136,8 @@ describe("⌥-click on a cell", () => {
     await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied Ready", detail: "Running" }));
     mouse("mousedown", cell(0, "name"), { altKey: true });
     expect(copied).toEqual(["Running", "payments-api-7d9f6c5b4-x2kqp"]);
+    // A name, as Copy name (`c`) says it.
+    await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied name", detail: "payments-api-7d9f6c5b4-x2kqp" }));
     expect(selectedKey()).toBeNull();
     expect(marked().size).toBe(0);
     expect(detailsOpen()).toBe(false);
@@ -205,7 +207,7 @@ describe("⌥-click on a cell", () => {
     mount({}, () => [{ ...rows[0], key: "z1/long", n: long }]);
     mouse("mousedown", cell(0, "name"), { altKey: true });
     expect(copied).toEqual([long]);
-    await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied Name", detail: `${"a".repeat(118)}🚀…` }));
+    await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied name", detail: `${"a".repeat(118)}🚀…` }));
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("Write permission denied.")) } });
     mouse("mousedown", cell(0, "name"), { altKey: true });
     await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "error", title: "Could not copy" }));

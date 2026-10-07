@@ -13,7 +13,7 @@ import { type Binding, bindAll, comboLabel, withKeys } from "../../lib/hotkeys";
 import { keyOf } from "../../lib/keymap";
 import { shortName } from "../../state/clusters";
 import { onControl } from "../../state/keyboard";
-import { toast } from "../../state/ui";
+import { copyText, toast } from "../../state/ui";
 import { HOLD_OVER, indexAtPos, type Line, LogBuffer, MAX_BYTES, MAX_LINES, pickPods, type PodRef, podKeyOf, podLabel, type Source, Sources } from "../logBuffer";
 import { Earlier, type EarlierState } from "./earlier";
 import { LogFields, LogSources } from "./LogPopovers";
@@ -723,10 +723,7 @@ export function LogViewer(props: LogViewerProps) {
   const textOf = (ls: readonly Line[], as: "text" | "jsonl") =>
     as === "jsonl" ? asJsonl(exportLines(ls), sourceOf) : asText(exportLines(ls), { timestamps: showTs(), utc: utc(), label: multiSource() ? (i) => label(i).padEnd(labelWidth()) : undefined });
   const copyLines = (ls: readonly Line[], as: "text" | "jsonl") => {
-    void navigator.clipboard.writeText(textOf(ls, as)).then(
-      () => toast("success", `Copied ${plural(ls.length, ls.length === 1 && !ls[0].more ? "line" : "entry", "entries")}`),
-      (e) => toast("error", "Could not copy", errorMessage(e)),
-    );
+    void copyText(textOf(ls, as), `Copied ${plural(ls.length, ls.length === 1 && !ls[0].more ? "line" : "entry", "entries")}`);
   };
   /** Copies the lines picked together, else the cursor's line. */
   const copyPicked = () => {

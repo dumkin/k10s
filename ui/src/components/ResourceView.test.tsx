@@ -425,7 +425,7 @@ describe("the context menu", () => {
   });
 
   it("acts on the row it was opened on, marks elsewhere or not", async () => {
-    const { nav } = await mount("MacIntel");
+    const { nav, ui } = await mount("MacIntel");
     nav.setMarked(new Set(["z1/pod-1", "z1/pod-2"]));
     const row = [...document.querySelectorAll(".tr")].find((r) => r.querySelector(".name")?.textContent === "pod-7")!;
     row.querySelector(".td")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
@@ -434,6 +434,21 @@ describe("the context menu", () => {
     key({ key: "c", code: "KeyC" });
     await settle();
     expect([copied, nav.marked().size]).toEqual([["pod-7"], 2]);
+    expect(ui.toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied name", detail: "pod-7" });
+  });
+
+  it("says so when the clipboard refuses, rather than failing unseen", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new DOMException("The request is not allowed by the user agent or the platform in the current context.", "NotAllowedError")) } });
+    const { nav, ui } = await mount("MacIntel");
+    nav.setSelectedKey("z1/pod-3");
+    key({ key: "F10", code: "F10", shiftKey: true });
+    await settle();
+    expect(document.querySelector(".menu")).not.toBeNull();
+    // The menu runs the action without waiting for it, as the key does: a refusal it threw would go unhandled.
+    key({ key: "c", code: "KeyC" });
+    await settle();
+    expect(document.querySelector(".menu")).toBeNull();
+    expect(ui.toasts().map((t) => [t.kind, t.title, t.detail])).toEqual([["error", "Could not copy", "The request is not allowed by the user agent or the platform in the current context."]]);
   });
 });
 

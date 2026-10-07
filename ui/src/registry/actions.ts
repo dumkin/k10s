@@ -8,7 +8,7 @@ import { COMPARE_TAB, compareRows, isPinned, rowRef, togglePins } from "../state
 import { debugImage, type LogSourceDef, nodeShellImage, nodeShellNamespace, openLogs, openTerminal, setDebugImage, setNodeShellImage, setNodeShellNamespace } from "../state/dock";
 import { openInBrowser, setOpenInBrowser, startForward } from "../state/forwards";
 import { objectRef, openDetails, resourceTitle, unmark } from "../state/nav";
-import { ask, busyToast, noteReadOnlyRefusal, readOnly, toast } from "../state/ui";
+import { ask, busyToast, copyText, noteReadOnlyRefusal, readOnly, toast } from "../state/ui";
 import type { UIRow } from "../state/view";
 import { mainView } from "../state/views";
 import { tabKeyId } from "./details";
@@ -993,9 +993,10 @@ registerAction({
   shortcut: "c",
   multi: true,
   applies: () => true,
-  async run(ctx) {
-    await navigator.clipboard.writeText(ctx.rows.map((r) => r.n).join("\n"));
-    toast("info", "Copied to clipboard");
+  run(ctx) {
+    const names = ctx.rows.map((r) => r.n);
+    // A name per line; the toast lists them on one.
+    return copyText(names.join("\n"), names.length > 1 ? `Copied ${names.length} names` : "Copied name", names.join(", "));
   },
 });
 

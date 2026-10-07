@@ -3,7 +3,7 @@ import { Icon } from "../components/Icon";
 import { backend, type ObjectRef } from "../lib/backend";
 import { age, dateTime, parseTime } from "../lib/format";
 import { keepUnchanged } from "../lib/reactive";
-import { now, toast } from "../state/ui";
+import { copyText, now } from "../state/ui";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type K8sObject = Record<string, any>;
@@ -221,13 +221,7 @@ export function Conditions(props: { conditions?: K8sObject[] | null }) {
 
 export function CopyButton(props: { text: () => string; label?: string }) {
   return (
-    <button
-      class="btn sm ghost"
-      onClick={async () => {
-        await navigator.clipboard.writeText(props.text());
-        toast("info", "Copied to clipboard");
-      }}
-    >
+    <button class="btn sm ghost" onClick={() => void copyText(props.text(), "Copied to clipboard")}>
       <Icon name="copy" size={12} /> {props.label ?? "Copy"}
     </button>
   );

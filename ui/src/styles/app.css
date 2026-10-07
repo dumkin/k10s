@@ -1897,7 +1897,7 @@ textarea::placeholder {
 .toast.error > .icon { color: var(--err); }
 .toast.info > .icon { color: var(--info); }
 .toast.error { box-shadow: var(--shadow-pop), inset 3px 0 0 var(--err-dot); }
-.toast .t-title { font-weight: 600; line-height: 1.35; }
+.toast .t-title { font-weight: 600; line-height: 1.35; word-break: break-word; }
 .toast .t-detail { color: var(--text-2); font-size: var(--fs-sm); margin-top: 3px; line-height: 1.45; word-break: break-word; user-select: text; }
 
 .menu {

@@ -4,6 +4,7 @@ import type { LogMessage, LogSpec, LogTarget } from "../../lib/backend";
 import { Tone } from "../../lib/backend";
 import { installHotkeys } from "../../lib/hotkeys";
 import type { DetailProps } from "../../registry/details";
+import { setToasts, toasts } from "../../state/ui";
 import type { UIRow } from "../../state/view";
 import { LogsTab } from "../LogsTab";
 import { budget, timing } from "./LogViewer";
@@ -133,6 +134,7 @@ afterEach(() => {
   setPretty(true);
   setFold(true);
   setPinned([]);
+  setToasts([]);
 });
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -469,6 +471,7 @@ describe("log view", () => {
     expect([...root.querySelectorAll(".lines .ln.inspan .txt")].map((e) => e.textContent)).toEqual(["line 20", "line 21", "line 22"]);
     await key(root, "c");
     expect(copied.at(-1)!.trimEnd().split("\n").map((l) => l.slice(l.indexOf("line ")))).toEqual(["line 20", "line 21", "line 22"]);
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied 3 entries" });
     // Esc: the lines picked, then the cursor; ⇧G follows new lines again.
     await key(root, "Escape");
     expect(root.querySelectorAll(".lines .ln.inspan")).toHaveLength(0);
@@ -589,6 +592,28 @@ describe("log view", () => {
     expect(root.querySelector(".lq-sg")).toBeNull();
     await type("timeout");
     expect(root.querySelector(".lq-sg")).toBeNull();
+  });
+
+  it("copies a field's value, from its menu or the line's details, and the line as JSON, and says what it copied", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: [[0, 1000, '{"level":"warn","msg":"slow commit","trace_id":"abc123","latency_ms":2205}']] });
+    await tick();
+    const click = async (el: Element | null | undefined) => {
+      (el as HTMLElement).click();
+      await tick();
+    };
+    const byText = (sel: string, text: string) => [...document.querySelectorAll(sel)].find((b) => b.textContent?.trim() === text);
+    await click(root.querySelector(".lines .ln .f-trace"));
+    await click(byText(".menu .opt", "Copy the value"));
+    expect(copied).toEqual(["abc123"]);
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied trace_id", detail: "abc123" });
+    await click(root.querySelector(".lines .ln .ln-x"));
+    const latency = [...root.querySelectorAll(".ld-field")].find((f) => f.querySelector(".ld-key")?.textContent === "latency_ms");
+    await click(latency?.querySelector('button[title="Copy the value"]'));
+    expect([copied.at(-1), toasts().at(-1)?.title, toasts().at(-1)?.detail]).toEqual(["2205", "Copied latency_ms", "2205"]);
+    await click(byText(".ld-actions button", "Copy JSON"));
+    expect(JSON.parse(copied.at(-1)!)).toEqual({ level: "warn", msg: "slow commit", trace_id: "abc123", latency_ms: 2205 });
+    expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied JSON", detail: undefined });
   });
 
   it("folds a long stack trace into its first lines, and unfolds it", async () => {
