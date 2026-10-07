@@ -40,16 +40,27 @@ export interface Timed {
   marker?: boolean;
 }
 
-/**
- * Counts `lines` (in time order) into at most `maxBuckets` buckets covering `from`…`to` (default: the lines' own
- * span). Null when there is nothing to count.
- */
-export function histogram(lines: readonly Timed[], maxBuckets: number, from?: number, to?: number): Histogram | null {
+/** The time `lines` (in time order) cover, or `from`…`to`; null when there is nothing to count. */
+function spanOf(lines: readonly Timed[], from?: number, to?: number): [number, number] | null {
   if (!lines.length) return null;
   const first = from ?? lines[0].key;
-  const last = Math.max(to ?? lines[lines.length - 1].key, first);
-  if (!first) return null;
-  const step = stepFor(Math.max(last - first, SECOND), maxBuckets);
+  return first ? [first, Math.max(to ?? lines[lines.length - 1].key, first)] : null;
+}
+
+/** The step to count `lines` in (see `histogram`) for at most `maxBuckets` buckets; null when there is nothing to count. */
+export function histogramStep(lines: readonly Timed[], maxBuckets: number, from?: number, to?: number): number | null {
+  const span = spanOf(lines, from, to);
+  return span && stepFor(Math.max(span[1] - span[0], SECOND), maxBuckets);
+}
+
+/**
+ * Counts `lines` (in time order) into buckets of `step` covering `from`…`to` (default: the lines' own span). Null
+ * when there is nothing to count.
+ */
+export function histogram(lines: readonly Timed[], step: number, from?: number, to?: number): Histogram | null {
+  const span = spanOf(lines, from, to);
+  if (!span) return null;
+  const [first, last] = span;
   const start = Math.floor(first / step) * step;
   const n = Math.floor((last - start) / step) + 1;
   const counts = new Uint32Array(n * LEVEL_SLOTS);

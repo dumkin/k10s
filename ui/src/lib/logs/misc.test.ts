@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { asJsonl, asRaw, asText, clockOf, gapOf, stampOf } from "./format";
 import { overlay, slicePieces, tokenize } from "./highlight";
-import { histogram, LEVEL_SLOTS, stepFor, stepLabel } from "./histogram";
+import { histogram, histogramStep, LEVEL_SLOTS, stepFor, stepLabel } from "./histogram";
 import { Level } from "./parse";
 import { PatternIds, patternOf, patternParts } from "./patterns";
 
@@ -47,14 +47,15 @@ describe("histogram", () => {
       { key: 12_200, lvl: Level.Info, marker: true },
       { key: 19_999, lvl: Level.Warn },
     ];
-    const h = histogram(lines, 10)!;
+    expect(histogramStep(lines, 10)).toBe(1000);
+    const h = histogram(lines, 1000)!;
     expect(h.step).toBe(1000);
     expect(h.start).toBe(10_000);
     expect(h.n).toBe(10);
     expect(Array.from(h.totals)).toEqual([2, 0, 1, 0, 0, 0, 0, 0, 0, 1]);
     expect(h.counts[0 * LEVEL_SLOTS + Level.Error]).toBe(1);
     expect(h.max).toBe(2);
-    expect(histogram([], 10)).toBeNull();
+    expect([histogramStep([], 10), histogram([], 1000)]).toEqual([null, null]);
   });
 });
 

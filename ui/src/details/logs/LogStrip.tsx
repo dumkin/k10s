@@ -3,7 +3,7 @@ import { Icon } from "../../components/Icon";
 import { count } from "../../lib/format";
 import { withKeys } from "../../lib/hotkeys";
 import { clockOf, gapOf } from "../../lib/logs/format";
-import { histogram, type Histogram, LEVEL_SLOTS, stepLabel } from "../../lib/logs/histogram";
+import { histogram, type Histogram, histogramStep, LEVEL_SLOTS, stepLabel } from "../../lib/logs/histogram";
 import { Level, LEVEL_NAME, LEVELS } from "../../lib/logs/parse";
 import { indexAtKey } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
@@ -51,8 +51,14 @@ export function LogStrip(props: { ctx: LogCtx }) {
     for (const l of passes.lines()) if (!l.marker) n[l.lvl]++;
     return n;
   });
+  // Counted again when the lines change, or the strip's width makes room for another step of time: not on every
+  // pixel of a drag of an edge.
+  const step = createMemo(() => histogramStep(passes.lines(), Math.floor(width() / BAR)));
   // (Only while it is shown: a memo is worked out whether it is read or not.)
-  const hist = createMemo<Histogram | null>(() => (histogramOpen() && c.roomy() ? histogram(passes.lines(), Math.floor(width() / BAR)) : null));
+  const hist = createMemo<Histogram | null>(() => {
+    const s = step();
+    return histogramOpen() && c.roomy() && s ? histogram(passes.lines(), s) : null;
+  });
 
   const rate = c.rate;
 
