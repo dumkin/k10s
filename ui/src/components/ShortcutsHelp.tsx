@@ -46,7 +46,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "space | mod+a", text: "Mark the row (and go down) / mark all shown" },
       { keys: "shift+n | shift+a", text: "Sort by name / age; again: the other way" },
       { keys: "0 | 1 … 9", text: "All namespaces / a namespace on its number key" },
-      { keys: "alt+1 … alt+9 | alt+0", text: "Hide or show a cluster's rows / show all" },
+      { keys: "alt+1 … alt+9 | alt+0", text: `Hide or show a cluster's rows / show all (${comboLabel("mod")}-click its chip: only its rows)` },
       { keys: "shift+f10 | contextmenu", text: "Actions menu of the selection, as a right-click opens it" },
       { keys: "escape", text: "Close the details, clear marks, clear the filter — one at a time" },
     ],

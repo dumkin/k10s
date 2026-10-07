@@ -1,6 +1,6 @@
 import { batch, createEffect, createMemo, createSignal, For, Index, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import type { Column } from "../lib/backend";
-import { type Binding, bindAll, comboLabel } from "../lib/hotkeys";
+import { type Binding, bindAll, comboLabel, isMac } from "../lib/hotkeys";
 import { isAuthFailure, isAuthFailureMessage, isError, isForbidden } from "../lib/k8s";
 import { type ActionContext, actionsFor, actionTitle } from "../registry/actions";
 import { catalogEntry } from "../registry/catalog";
@@ -38,7 +38,7 @@ import {
   toggleDetailsFull,
   toggleMark,
 } from "../state/nav";
-import { createTableModel, FILTER_HELP, hiddenClusters, isColumnVisible, setColumnVisible, setHiddenClusters, sort, toggleClusterHidden, toggleSort } from "../state/table";
+import { createTableModel, FILTER_HELP, hiddenClusters, isColumnVisible, onlyClusterShown, setColumnVisible, setHiddenClusters, soloCluster, sort, toggleClusterHidden, toggleSort } from "../state/table";
 import { paletteOpen, pickerOpen, toast } from "../state/ui";
 import type { UIRow } from "../state/view";
 import { hiddenMarkCount, mainView, selectionTargets } from "../state/views";
@@ -313,10 +313,13 @@ export function ResourceView() {
           title: `${hidden ? "Show" : "Hide"} rows of ${c}`,
           section: "View",
           color: clusterColor(c),
-          keywords: [shortName(c), "cluster", "rows", "hide", "show", "only"],
+          keywords: [shortName(c), "cluster", "rows", "hide", "show"],
           shortcut: i < 9 ? `alt+${i + 1}` : undefined,
           run: () => toggleClusterHidden(c),
         });
+        // ⌘-click on the pill. Already so: "Show rows of every cluster" (below) is the way back.
+        if (isMultiCluster() && !onlyClusterShown(c))
+          out.push({ id: `cluster-rows-only:${c}`, title: `Show only rows of ${c}`, section: "View", color: clusterColor(c), keywords: [shortName(c), "cluster", "rows", "only", "solo"], run: () => soloCluster(c) });
       });
       if (hiddenClusters().size)
         out.push({ id: "cluster-rows:all", title: "Show rows of every cluster", section: "View", icon: "eye", keywords: ["cluster", "unhide"], shortcut: "alt+0", run: () => void setHiddenClusters(new Set<string>()) });
@@ -488,7 +491,7 @@ export function ResourceView() {
                   if (s.state === "forbidden") return `${c}: no access\n${s.message ?? ""}`;
                   if (s.auth) return `${c}: sign-in failed — click to reconnect${k}\n${s.message ?? ""}`;
                   if (s.state === "error" || s.state === "partial") return `${c}\n${s.message ?? ""}`;
-                  return `${c}${conn()?.version ? ` · ${conn()!.version}` : ""} — click to ${hidden() ? "show" : "hide"}${k}`;
+                  return `${c}${conn()?.version ? ` · ${conn()!.version}` : ""} — click to ${hidden() ? "show" : "hide"}${k}, ${comboLabel("mod")}-click: ${onlyClusterShown(c) ? "every cluster" : "only this cluster"}`;
                 };
                 return (
                   <button
@@ -499,7 +502,14 @@ export function ResourceView() {
                     data-hint={key()}
                     data-hint-ctx="table"
                     data-hint-at="below"
-                    onClick={() => clusterPill(c)}
+                    // ⌘-click (Ctrl-click off macOS): only this cluster's rows, whatever its state — again: every cluster's.
+                    onClick={(e) => (e.metaKey || e.ctrlKey ? soloCluster(c) : clusterPill(c))}
+                    // A Ctrl-click on macOS is a right click: a context menu comes, no click.
+                    onContextMenu={(e) => {
+                      if (!isMac || !e.ctrlKey) return;
+                      e.preventDefault();
+                      soloCluster(c);
+                    }}
                   >
                     <Switch fallback={<span class="swatch" style={{ background: clusterColor(c) }} />}>
                       <Match when={st().state === "loading"}>

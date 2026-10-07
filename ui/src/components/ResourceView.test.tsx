@@ -324,6 +324,61 @@ describe("keyboard", () => {
 });
 
 describe("cluster pills", () => {
+  const pill = (i: number) => document.querySelectorAll<HTMLButtonElement>(".cluster-pill")[i];
+  const clickPill = (i: number, init: MouseEventInit = {}) => pill(i).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...init }));
+  const CLUSTERS = ["prod-eu-z1", "prod-eu-z2", "prod-eu-z3"];
+
+  /** Three connected clusters (the view's rows still on their way: their pills hide and show them all the same). */
+  async function threeClusters(platform: "MacIntel" | "Linux x86_64") {
+    await mount(platform);
+    const clusters = await import("../state/clusters");
+    const table = await import("../state/table");
+    clusters.setSelectedClustersRaw(CLUSTERS);
+    for (const c of CLUSTERS) clusters.setClusterStatus(c, { state: "connected", version: "v1.33.4" });
+    return { clusters, table };
+  }
+
+  it.each([
+    ["macOS", "MacIntel", { metaKey: true }],
+    ["Linux / Windows", "Linux x86_64", { ctrlKey: true }],
+  ] as const)("show only their cluster's rows on a ⌘-click (%s), every cluster's on the next; a click hides or shows one", async (_name, platform, mod) => {
+    const { table } = await threeClusters(platform);
+    expect(pill(1).title).toMatch(/-click: only this cluster$/);
+    clickPill(1, mod);
+    expect([...table.hiddenClusters()]).toEqual(["prod-eu-z1", "prod-eu-z3"]);
+    expect(pill(1).title).toMatch(/-click: every cluster$/);
+    // Another one, hidden: only it now.
+    clickPill(2, mod);
+    expect([...table.hiddenClusters()]).toEqual(["prod-eu-z1", "prod-eu-z2"]);
+    clickPill(2, mod);
+    expect([...table.hiddenClusters()]).toEqual([]);
+    clickPill(0);
+    expect([...table.hiddenClusters()]).toEqual(["prod-eu-z1"]);
+  });
+
+  it("take a Ctrl-click on macOS (a right click there) for a ⌘-click, and leave right clicks alone", async () => {
+    const { table } = await threeClusters("MacIntel");
+    const contextMenu = (i: number, init: MouseEventInit) => {
+      const e = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, ...init });
+      pill(i).dispatchEvent(e);
+      return e;
+    };
+    expect(contextMenu(2, { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect([...table.hiddenClusters()]).toEqual(["prod-eu-z1", "prod-eu-z2"]);
+    expect(contextMenu(0, { button: 2 }).defaultPrevented).toBe(false);
+    expect([...table.hiddenClusters()]).toEqual(["prod-eu-z1", "prod-eu-z2"]);
+  });
+
+  it("only show rows on a ⌘-click, without connecting a failed cluster", async () => {
+    const { clusters, table } = await threeClusters("MacIntel");
+    engine.connect.mockReset();
+    engine.reconnect.mockReset();
+    clusters.setClusterStatus("prod-eu-z1", { state: "error", message: 'cluster "prod-eu-z1": no answer within 60s (is the cluster reachable? VPN?)' });
+    clickPill(0, { metaKey: true });
+    expect([...table.hiddenClusters()]).toEqual(["prod-eu-z2", "prod-eu-z3"]);
+    expect([engine.connect.mock.calls, engine.reconnect.mock.calls]).toEqual([[], []]);
+  });
+
   it("try a failed connection again with the credentials it has, and get fresh ones where they failed", async () => {
     await mount("MacIntel");
     const clusters = await import("../state/clusters");
@@ -335,7 +390,6 @@ describe("cluster pills", () => {
       state: "error",
       message: 'cluster "prod-eu-z2": auth plugin `kubelogin` did not finish within 90s (waiting for a login?). Run it in a terminal to see why, then reconnect',
     });
-    const pill = (i: number) => document.querySelectorAll<HTMLButtonElement>(".cluster-pill")[i];
     expect(pill(0).title).toMatch(/^prod-eu-z1: cannot connect — click to retry \(⌥1\)/);
     expect(pill(1).title).toMatch(/^prod-eu-z2: cannot connect — click to reconnect \(⌥2\)/);
     pill(0).click();

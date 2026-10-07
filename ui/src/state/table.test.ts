@@ -2,8 +2,9 @@ import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Tone } from "../lib/backend";
 import { registerColumnKind } from "../registry/columns";
+import { setSelectedClustersRaw } from "./clusters";
 import { setFilter } from "./nav";
-import { createTableModel, hiddenClusters, isRowVisible, previewColumnWidth, setColumnWidth, setHiddenClusters, sortRows, toggleClusterHidden, toggleSort } from "./table";
+import { createTableModel, hiddenClusters, isRowVisible, onlyClusterShown, previewColumnWidth, setColumnWidth, setHiddenClusters, soloCluster, sortRows, toggleClusterHidden, toggleSort } from "./table";
 import type { UIRow, ViewFeed } from "./view";
 
 const row = (cl: string, n: string, ns = "payments"): UIRow => ({ key: `${cl}/${n}`, cl, u: n, n, ns, rv: "1", t: 0, s: Tone.Ok, c: [] });
@@ -11,6 +12,7 @@ const row = (cl: string, n: string, ns = "payments"): UIRow => ({ key: `${cl}/${
 afterEach(() => {
   setFilter("");
   setHiddenClusters(new Set<string>());
+  setSelectedClustersRaw([]);
 });
 
 describe("isRowVisible", () => {
@@ -32,6 +34,34 @@ describe("isRowVisible", () => {
     expect(hiddenClusters().has("z2")).toBe(true);
     expect(isRowVisible(a)).toBe(true);
     expect(isRowVisible(b)).toBe(false);
+  });
+});
+
+describe("soloCluster", () => {
+  it("shows only one cluster's rows, again every cluster's", () => {
+    setSelectedClustersRaw(["z1", "z2", "z3"]);
+    soloCluster("z2");
+    expect([...hiddenClusters()]).toEqual(["z1", "z3"]);
+    expect(onlyClusterShown("z2")).toBe(true);
+    expect([isRowVisible(row("z1", "payments-api")), isRowVisible(row("z2", "payments-api"))]).toEqual([false, true]);
+    // A hidden one: now only it.
+    soloCluster("z3");
+    expect([...hiddenClusters()]).toEqual(["z1", "z2"]);
+    soloCluster("z3");
+    expect([...hiddenClusters()]).toEqual([]);
+    expect(onlyClusterShown("z3")).toBe(false);
+  });
+
+  it("counts the selected clusters only", () => {
+    // Hidden before it was deselected: no rows of it are shown either way, and it is let go.
+    setSelectedClustersRaw(["z1", "z2"]);
+    setHiddenClusters(new Set(["gone", "z1"]));
+    expect(onlyClusterShown("z2")).toBe(true);
+    soloCluster("z2");
+    expect([...hiddenClusters()]).toEqual([]);
+    setHiddenClusters(new Set(["gone"]));
+    soloCluster("z1");
+    expect([...hiddenClusters()]).toEqual(["z2"]);
   });
 });
 

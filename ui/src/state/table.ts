@@ -3,7 +3,7 @@ import type { Cell, Column } from "../lib/backend";
 import { isBoolean, isNumber, isObject, isString, persisted, recordOf } from "../lib/persist";
 import { globalMemo } from "../lib/reactive";
 import { columnKind, extraColumns } from "../registry/columns";
-import { isMultiCluster } from "./clusters";
+import { isMultiCluster, selectedClusters } from "./clusters";
 import { currentResource, filter, namespaces, resourceKey } from "./nav";
 import type { UIRow, ViewFeed } from "./view";
 
@@ -78,6 +78,20 @@ export function toggleClusterHidden(cluster: string) {
   if (next.has(cluster)) next.delete(cluster);
   else next.add(cluster);
   setHiddenClusters(next);
+}
+
+/** Whether `cluster`'s rows are the only ones shown (of the selected clusters'). */
+export function onlyClusterShown(cluster: string): boolean {
+  const hidden = hiddenClusters();
+  return !hidden.has(cluster) && selectedClusters().every((c) => c === cluster || hidden.has(c));
+}
+
+/**
+ * Only `cluster`'s rows (⌘-click on its pill); when they already are the only ones shown, every cluster's again.
+ * (Hidden clusters no longer selected are dropped: they don't count against "only".)
+ */
+export function soloCluster(cluster: string) {
+  setHiddenClusters(new Set(onlyClusterShown(cluster) ? [] : selectedClusters().filter((c) => c !== cluster)));
 }
 
 /** Natural-order sort key: lower-cased, digit runs zero-padded ("pod-9" < "pod-10"). */

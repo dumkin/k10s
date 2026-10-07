@@ -27,7 +27,7 @@ On Linux and Windows, `⌘` is `Ctrl` (so `⌃D` is also `Ctrl+D`), `⌥` is `Al
 | `/`, `⌘F` | filter (`Esc` clears it, a second `Esc` leaves the field) |
 | `↵` | details |
 | `0` / `1` … `9` | all namespaces / the namespace on that digit, like k9s favorites: those from your kubeconfig first, then recent ones |
-| `⌥1` … `⌥9` / `⌥0` | hide or show the rows of cluster N (like clicking its chip) / show all |
+| `⌥1` … `⌥9` / `⌥0` | hide or show the rows of cluster N (like clicking its chip) / show all. `⌘`-click a chip (on macOS `⌃`-click too): only that cluster's rows; again: every cluster's |
 | `⇧N` / `⇧A` | sort by name / age; again to reverse (any column: "Sort by…" in the palette) |
 | `Space`, `⌘A` | mark a row / mark all visible rows |
 | `⇧R`, `⇧S`, `⌃D` (`⌘⌫`), `c` | restart, scale, delete, copy the name (read-only mode explains why not) |
