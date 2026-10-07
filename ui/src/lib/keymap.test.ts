@@ -1,6 +1,7 @@
 import { createRoot, createEffect } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PrefsSnapshot } from "./backend";
+import type { KeyId } from "./keymap";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -64,7 +65,7 @@ describe("the keys of commands", () => {
     const { keymap } = await start();
     expect([keymap.keysOf("logs.wrap"), keymap.keysOf("app.zoom-in"), keymap.keyOf("app.palette")]).toEqual([["w"], ["mod+=", "mod++"], "mod+k"]);
     // No such command: no keys.
-    expect([keymap.keysOf("logs.nope"), keymap.keyOf("nope")]).toEqual([[], undefined]);
+    expect([keymap.keysOf("logs.nope" as KeyId), keymap.keyOf("nope" as KeyId)]).toEqual([[], undefined]);
     expect(keymap.keyCommand("table.down")).toMatchObject({ scope: "table", defaults: ["j"] });
   });
 
@@ -105,7 +106,7 @@ describe("the keys of commands", () => {
         attention: ["j"],
       },
     });
-    expect(["logs.wrap", "logs.pause", "logs.copy", "logs.expand", "logs.pretty", "logs.find", "table.down", "yaml.find", "attention.down"].map(keymap.keysOf)).toEqual([
+    expect((["logs.wrap", "logs.pause", "logs.copy", "logs.expand", "logs.pretty", "logs.find", "table.down", "yaml.find", "attention.down"] as const).map(keymap.keysOf)).toEqual([
       ["w"],
       ["s"],
       ["c"],
@@ -155,9 +156,9 @@ describe("the commands of tabs and actions", () => {
     await import("../details");
     const { actionKeyId, allActions } = await import("../registry/actions");
     await import("../registry/helmActions");
-    expect(["tab.overview", "tab.logs", "tab.compare", "tab.values"].map(keymap.keysOf)).toEqual([["d"], ["l"], ["="], ["v"]]);
+    expect((["tab.overview", "tab.logs", "tab.compare", "tab.values"] as const).map(keymap.keysOf)).toEqual([["d"], ["l"], ["="], ["v"]]);
     expect(keymap.keyCommand("tab.logs")).toMatchObject({ scope: "details", title: "Logs tab" });
-    expect(["action.shell", "action.delete", "action.helm-uninstall", "action.cordon"].map(keymap.keysOf)).toEqual([["s"], ["ctrl+d", "mod+backspace"], ["ctrl+d"], []]);
+    expect((["action.shell", "action.delete", "action.helm-uninstall", "action.cordon"] as const).map(keymap.keysOf)).toEqual([["s"], ["ctrl+d", "mod+backspace"], ["ctrl+d"], []]);
     // What it is called on one object, without "…".
     expect(["action.delete", "action.cordon", "action.compare-pin"].map((id) => keymap.keyCommand(id)?.title)).toEqual(["Delete", "Cordon", "Pin to compare"]);
     // The settings' keys.

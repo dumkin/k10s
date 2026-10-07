@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../components/Icon";
 import { backend, errorMessage } from "../lib/backend";
-import { bindAll, withKeys } from "../lib/hotkeys";
+import { type Binding, bindAll, withKeys } from "../lib/hotkeys";
 import { keyOf } from "../lib/keymap";
 import { blockMask, type Token, tokenizeLine } from "../lib/yaml";
 import { type DetailProps, deferReady } from "../registry/details";
@@ -83,11 +83,13 @@ export function YamlTab(props: DetailProps) {
     };
     onCleanup(
       bindAll(
-        [
-          { id: "yaml.find", inInputs: true, run: focusFind },
-          { id: "yaml.next-match", run: go(1) },
-          { id: "yaml.previous-match", run: go(-1) },
-        ].map((b) => ({ ...b, when: detailsHaveKeyboard })),
+        (
+          [
+            { id: "yaml.find", inInputs: true, run: focusFind },
+            { id: "yaml.next-match", run: go(1) },
+            { id: "yaml.previous-match", run: go(-1) },
+          ] satisfies Binding[]
+        ).map((b) => ({ ...b, when: detailsHaveKeyboard })),
       ),
     );
   });

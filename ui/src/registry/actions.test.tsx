@@ -25,7 +25,7 @@ import { installHotkeys, isMac } from "../lib/hotkeys";
 import { clearMarks, marked, setMarked } from "../state/nav";
 import { dialog, dismissToast, noteReadOnlyRefusal, readOnly, setReadOnly, toasts } from "../state/ui";
 import type { UIRow } from "../state/view";
-import { type ActionContext, actionsFor, deleteConfirmText, NO_PERMISSION_HINT, READ_ONLY_HINT, TYPED_CONFIRM_OVER, typedConfirmText } from "./actions";
+import { type ActionContext, actionFor, actionsFor, deleteConfirmText, NO_PERMISSION_HINT, READ_ONLY_HINT, type ResourceAction, TYPED_CONFIRM_OVER, typedConfirmText } from "./actions";
 
 let dispose: () => void;
 
@@ -412,6 +412,21 @@ describe("typed confirmation", () => {
     modEnter();
     await done;
     expect(engine.restart).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("an action by its id (what its key runs)", () => {
+  const shape = (a: ResourceAction | undefined) => a && { id: a.id, disabled: a.disabled, lock: a.lock, note: a.note };
+  const one = ctxOf([deployment("prod-eu-z1", "web", 2)]);
+  const two = ctxOf([deployment("prod-eu-z1", "web", 2), deployment("prod-eu-z2", "api", 1)]);
+
+  it("is what the list of actions has for it, and nothing where the list has none", () => {
+    access.denied = (cluster) => cluster === "prod-eu-z2";
+    for (const ctx of [one, two]) expect(actionsFor(ctx).map((a) => shape(actionFor(a.id, ctx)))).toEqual(actionsFor(ctx).map(shape));
+    // Left out where the rows are of a kind it isn't for, several where it takes one, none at all.
+    expect([actionFor("shell", one), actionFor("events", two), actionFor("restart", ctxOf([])), actionFor("nope", one)]).toEqual([undefined, undefined, undefined, undefined]);
+    noteReadOnlyRefusal();
+    expect(actionFor("restart", two)).toMatchObject({ disabled: READ_ONLY_HINT });
   });
 });
 

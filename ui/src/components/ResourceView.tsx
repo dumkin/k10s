@@ -2,11 +2,11 @@ import { batch, createEffect, createMemo, createSignal, For, Index, Match, on, o
 import type { Column } from "../lib/backend";
 import { type Binding, bindAll, comboLabel, isMac, withKeys } from "../lib/hotkeys";
 import { isAuthFailure, isAuthFailureMessage, isError, isForbidden } from "../lib/k8s";
-import { keyOf } from "../lib/keymap";
-import { type ActionContext, actionKeyId, actionsFor, actionTitle, allActions } from "../registry/actions";
+import { keyCommands, keyOf } from "../lib/keymap";
+import { type ActionContext, actionFor, actionKeyId, actionsFor, actionTitle, allActions, type ResourceAction } from "../registry/actions";
 import { catalogEntry } from "../registry/catalog";
 import { extraColumns } from "../registry/columns";
-import { allDetailTabs, tabKeyId, tabsFor } from "../registry/details";
+import { allDetailTabs, type DetailTab, tabKeyId, tabsFor } from "../registry/details";
 import { clusterColor, clusterStatus, ensureConnected, isMultiCluster, retryCluster, selectedClusters, shortName } from "../state/clusters";
 import { type Command, registerCommands } from "../state/commands";
 import { focusInSidebar, modalOpen, onControl, tableHasKeyboard } from "../state/keyboard";
@@ -49,6 +49,9 @@ import { Kbd } from "./Kbd";
 import { addHintPanel } from "./KeyHints";
 import { Popover } from "./Popover";
 import { ResourceTable, type TableHandle } from "./ResourceTable";
+
+/** The view's keys work while the table has the keyboard — or, `anywhere`, while no overlay has it (the details too). */
+type ViewBinding = Binding & { anywhere?: boolean };
 
 export function ResourceView() {
   const model = createTableModel(mainView);
@@ -127,7 +130,7 @@ export function ResourceView() {
 
   onMount(() => {
     const page = () => table?.pageSize() ?? 20;
-    const base: (Binding & { anywhere?: boolean })[] = [
+    const base: ViewBinding[] = [
       { id: "table.down", run: () => moveBy(1) },
       { combo: "arrowdown", run: () => moveBy(1) },
       { id: "table.up", run: () => moveBy(-1) },
@@ -244,51 +247,66 @@ export function ResourceView() {
           moveBy(1);
         },
       },
+      // Back / forward through views (resource, namespaces, filter, selection, details): ⌘[ ⌘] on macOS,
+      // Alt+← / Alt+→ elsewhere, like browsers. Mouse back/forward buttons are handled below.
+      { id: "nav.back", inInputs: true, anywhere: true, run: () => void goBack() },
+      { id: "nav.forward", inInputs: true, anywhere: true, run: () => void goForward() },
     ];
-    // Back / forward through views (resource, namespaces, filter, selection, details): ⌘[ ⌘] on macOS,
-    // Alt+← / Alt+→ elsewhere, like browsers. Mouse back/forward buttons are handled below.
-    base.push({ id: "nav.back", inInputs: true, anywhere: true, run: () => void goBack() });
-    base.push({ id: "nav.forward", inInputs: true, anywhere: true, run: () => void goForward() });
     // A details tab by its key: d r l e y = for objects (Overview, Relations, Logs, Events, YAML, Compare), d v m h for
     // Helm releases. Tabs that share a key go by the resource: the one it has opens.
-    for (const tab of allDetailTabs()) {
-      base.push({
-        id: tabKeyId(tab),
-        anywhere: true,
-        run: () => {
-          // L on several marked rows (in the table): their logs together, in the dock; = compares them — the action
-          // that goes by the tab's key.
-          if (tableFocused() && actionCtx().rows.length > 1) {
-            const action = actionsFor(actionCtx()).find((a) => a.tab === tab.id);
-            if (action) {
-              void action.run(actionCtx());
-              return;
-            }
-          }
-          const k = selectedKey();
-          if (!k || !tabsFor(resourceKey(), currentResource()).some((t) => t.id === tab.id)) return false;
-          batch(() => {
-            openDetails(k);
-            setDetailsTab(tab.id);
-          });
-        },
-      });
-    }
+    const tabKey = (tab: DetailTab): ViewBinding => ({
+      id: tabKeyId(tab),
+      anywhere: true,
+      run: () => {
+        // On several marked rows (in the table) the action that goes by the tab's key runs instead: L their logs
+        // together, in the dock; = compares them.
+        const ctx = actionCtx();
+        const lent = ctx.rows.length > 1 && tableFocused() ? allActions().find((a) => a.tab === tab.id && a.multi) : undefined;
+        const action = lent && actionFor(lent.id, ctx);
+        if (action) {
+          void action.run(ctx);
+          return;
+        }
+        const k = selectedKey();
+        if (!k || !tabsFor(resourceKey(), currentResource()).some((t) => t.id === tab.id)) return false;
+        batch(() => {
+          openDetails(k);
+          setDetailsTab(tab.id);
+        });
+      },
+    });
     // Action keys (restart, scale, delete, copy…) act on the current selection. Actions that share a key go by the
     // resource: the first that applies runs.
-    for (const action of allActions()) {
-      if (action.tab) continue;
-      base.push({
-        id: actionKeyId(action),
-        run: () => {
-          const a = actionsFor(actionCtx()).find((x) => x.id === action.id);
-          if (!a) return false;
-          void a.run(actionCtx());
-        },
-      });
-    }
-    const off = bindAll(base.map(({ anywhere, ...b }) => ({ ...b, when: () => (anywhere ? !overlayOpen() : tableFocused()) && (b.when?.() ?? true) })));
-    onCleanup(off);
+    const actionKey = (action: ResourceAction): ViewBinding => ({
+      id: actionKeyId(action),
+      run: () => {
+        const ctx = actionCtx();
+        const a = actionFor(action.id, ctx);
+        if (!a) return false;
+        void a.run(ctx);
+      },
+    });
+    /** The keys of the tabs and the actions not bound yet: every one at first, then those registered later (a plugin's). */
+    const bound = new Set<string>();
+    const newKeys = () => {
+      const out: ViewBinding[] = [];
+      for (const tab of allDetailTabs()) {
+        if (bound.has(tabKeyId(tab))) continue;
+        bound.add(tabKeyId(tab));
+        out.push(tabKey(tab));
+      }
+      for (const action of allActions()) {
+        if (action.tab || bound.has(actionKeyId(action))) continue;
+        bound.add(actionKeyId(action));
+        out.push(actionKey(action));
+      }
+      return out;
+    };
+    const scoped = (list: ViewBinding[]) => list.map(({ anywhere, ...b }) => ({ ...b, when: () => (anywhere ? !overlayOpen() : tableFocused()) && (b.when?.() ?? true) }));
+    const offs = [bindAll(scoped([...base, ...newKeys()]))];
+    // A tab or an action registered later comes with a command of the keymap: its key is bound then (after the others).
+    createEffect(on(keyCommands, () => void offs.push(bindAll(scoped(newKeys()))), { defer: true }));
+    onCleanup(() => offs.forEach((off) => off()));
 
     // Mouse buttons 4/5 (back/forward). `mouseup` is where browsers navigate; cancelling it keeps the
     // dev-mode page (and WebViews that would) from leaving the app.

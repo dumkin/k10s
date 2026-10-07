@@ -80,7 +80,6 @@ export function registerAction(action: ResourceAction) {
   const i = actions.findIndex((a) => a.id === action.id);
   if (i >= 0) actions[i] = action;
   else actions.push(action);
-  const keys = action.shortcut;
   if (!action.tab)
     registerKeyCommand({
       id: actionKeyId(action),
@@ -88,12 +87,12 @@ export function registerAction(action: ResourceAction) {
       get title() {
         return keyTitle(action);
       },
-      defaults: keys === undefined ? [] : typeof keys === "string" ? [keys] : keys,
+      defaults: ([] as string[]).concat(action.shortcut ?? []),
     });
 }
 
 /** The keymap's command whose keys run an action: `action.delete` (settings.json: `keys.action.delete`), or its tab's. */
-export const actionKeyId = (a: Pick<ResourceAction, "id" | "tab">) => (a.tab ? tabKeyId({ id: a.tab }) : `action.${a.id}`);
+export const actionKeyId = (a: Pick<ResourceAction, "id" | "tab">) => (a.tab ? tabKeyId({ id: a.tab }) : (`action.${a.id}` as const));
 
 /** What an action is called on one object, for the list of keys: "Delete", "Cordon". */
 function keyTitle(a: ResourceAction): string {
@@ -111,16 +110,29 @@ export const allActions = (): readonly ResourceAction[] => actions;
 export function actionsFor(ctx: ActionContext): ResourceAction[] {
   if (!ctx.rows.length) return [];
   const ro = readOnly();
-  return actions
-    .filter((a) => (ctx.rows.length === 1 || a.multi) && a.applies(ctx))
-    .map((a) => {
-      if (ro && a.mutating) return blockedByReadOnly(a, ctx);
-      if (!a.needs) return a;
-      // Reactive: buttons lock (or unlock) as the cluster answers.
-      const denied = deniedRows(a, ctx, accessOf);
-      if (denied.size && denied.size === ctx.rows.length) return blockedByAccess(a, ctx, denied);
-      return withAccessGate(a, denied.size ? `${denied.size} of ${ctx.rows.length} not allowed — you may not ${denialSummary(denied)} — they are left out` : undefined);
-    });
+  return actions.filter((a) => offered(a, ctx)).map((a) => asOffered(a, ctx, ro));
+}
+
+/**
+ * One action as `actionsFor` has it (undefined where it doesn't): what its key runs. Only that action is looked at —
+ * the others' permissions are not asked, and on many marked rows that is most of the work.
+ */
+export function actionFor(id: string, ctx: ActionContext): ResourceAction | undefined {
+  const a = actions.find((x) => x.id === id);
+  return a && ctx.rows.length && offered(a, ctx) ? asOffered(a, ctx, readOnly()) : undefined;
+}
+
+/** Whether `a` is offered on what `ctx` holds: rows it applies to — several only if it works on several. */
+const offered = (a: ResourceAction, ctx: ActionContext) => (ctx.rows.length === 1 || a.multi) && a.applies(ctx);
+
+/** The action as it can run now: locked by read-only mode or missing permissions, or left to the rows allowed. */
+function asOffered(a: ResourceAction, ctx: ActionContext, ro: boolean): ResourceAction {
+  if (ro && a.mutating) return blockedByReadOnly(a, ctx);
+  if (!a.needs) return a;
+  // Reactive: buttons lock (or unlock) as the cluster answers.
+  const denied = deniedRows(a, ctx, accessOf);
+  if (denied.size && denied.size === ctx.rows.length) return blockedByAccess(a, ctx, denied);
+  return withAccessGate(a, denied.size ? `${denied.size} of ${ctx.rows.length} not allowed — you may not ${denialSummary(denied)} — they are left out` : undefined);
 }
 
 export const actionTitle = (a: ResourceAction, ctx: ActionContext) => (typeof a.title === "function" ? a.title(ctx) : a.title);

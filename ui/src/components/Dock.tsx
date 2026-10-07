@@ -1,12 +1,11 @@
 import { createEffect, createSignal, For, type JSX, lazy, Match, on, onCleanup, onMount, Show, Suspense, Switch } from "solid-js";
-import { bindAll, isMac, withKeys } from "../lib/hotkeys";
+import { bindAll, isMac, keyLabel, withKeys } from "../lib/hotkeys";
 import { splitterKeyDown } from "../lib/splitter";
 import { clusterColor, selectedClusters, shortName } from "../state/clusters";
 import { closeTerminal, DOCK_MIN, dockHeight, dockOpen, dockTab, setDockHeight, setDockOpen, setDockSpace, setDockTab, type TermTab, termCluster, termStatus, termTitle, termTabs } from "../state/dock";
 import { DockLogs } from "../details/logs/DockLogs";
 import { focusInDock } from "../state/keyboard";
 import { Icon } from "./Icon";
-import { Kbd } from "./Kbd";
 
 // xterm.js is most of a terminal's weight: loaded with the first one, not with the app.
 const TerminalView = lazy(() => import("./Terminal").then((m) => ({ default: m.TerminalView })));
@@ -173,7 +172,23 @@ export function Dock() {
           <div class="dock-empty faint">
             <Icon name="terminal" size={20} />
             <span>
-              No terminals. <Kbd id="action.shell" /> opens a shell in the selected pod, <Kbd id="action.attach" /> attaches to it.
+              No terminals.
+              <Show when={keyLabel("action.shell")}>
+                {(shell) => (
+                  <>
+                    {" "}
+                    <span class="kbd">{shell()}</span> opens a shell in the selected pod{keyLabel("action.attach") ? "," : "."}
+                  </>
+                )}
+              </Show>
+              <Show when={keyLabel("action.attach")}>
+                {(attach) => (
+                  <>
+                    {" "}
+                    <span class="kbd">{attach()}</span> attaches to {keyLabel("action.shell") ? "it" : "the selected pod"}.
+                  </>
+                )}
+              </Show>
             </span>
           </div>
         </Show>

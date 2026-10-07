@@ -161,6 +161,8 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
       });
   });
   const pinnedKeys = createMemo(() => columns().map((x) => x.key));
+  /** The tooltips of a line's expand button, with the key of `logs.expand`: the same for every line, made once. */
+  const expandTitles = createMemo(() => ({ open: withKeys("Collapse", "logs.expand"), closed: withKeys("Expand: fields, time, source", "logs.expand") }));
   const colChars = () => columns().reduce((n, x) => n + x.w + 2, 0) + (pretty() ? 6 : 0);
   /** Characters of text a wrapped row holds. */
   const cols = createMemo(() => Math.max(20, Math.floor((width() - 40) / charW()) - tsChars() - srcChars() - colChars()));
@@ -471,7 +473,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
           }}
         >
           {/* (Its chevron is drawn by CSS: an icon in every line drawn adds up in a busy log.) */}
-          <button class="ln-x" title={withKeys(isOpen() ? "Collapse" : "Expand: fields, time, source", "logs.expand")} onClick={() => c.toggleExpanded(l)} />
+          <button class="ln-x" title={isOpen() ? expandTitles().open : expandTitles().closed} onClick={() => c.toggleExpanded(l)} />
           <Prefix l={l} />
           <Show when={pretty() && (columns().length > 0 || head().tag !== undefined || s() !== null)}>
             <span class={`tag lvl-${head().tag ?? 0}`}>{head().tag ? LEVEL_TAG[head().tag!] : ""}</span>

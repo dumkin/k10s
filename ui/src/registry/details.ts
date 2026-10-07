@@ -39,7 +39,7 @@ export function registerDetailTab(tab: DetailTab) {
 }
 
 /** The keymap's command that opens a tab: `tab.logs` (settings.json: `keys.tab.logs`). */
-export const tabKeyId = (tab: Pick<DetailTab, "id">) => `tab.${tab.id}`;
+export const tabKeyId = (tab: Pick<DetailTab, "id">) => `tab.${tab.id}` as const;
 
 export function tabsFor(resourceKey: string, resource?: ResourceInfo): DetailTab[] {
   return tabs.filter((t) => t.when(resourceKey, resource));

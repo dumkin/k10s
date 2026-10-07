@@ -39,7 +39,7 @@ export interface KeyCommand {
 const NONE: readonly string[] = [];
 
 /** The app's own commands; the details tabs (`tab.*`) and the actions (`action.*`) come with their registries. */
-const BUILTIN: KeyCommand[] = [
+const BUILTIN = [
   { id: "app.palette", scope: "global", title: "Command palette (again: close it)", defaults: ["mod+k"] },
   { id: "app.palette-new", scope: "global", title: "Command palette, with nothing typed", defaults: ["mod+p"] },
   { id: "app.command", scope: "global", title: "k9s command (the palette, from “:”)", defaults: [":"] },
@@ -110,10 +110,13 @@ const BUILTIN: KeyCommand[] = [
   { id: "attention.first", scope: "attention", title: "First problem", defaults: ["g"] },
   { id: "attention.last", scope: "attention", title: "Last problem", defaults: ["shift+g"] },
   { id: "attention.filter", scope: "attention", title: "Filter", defaults: ["/"] },
-];
+] as const satisfies readonly KeyCommand[];
+
+/** A command's id: one of the app's own (a typo doesn't compile), a details tab's (`tab.logs`), an action's (`action.delete`). */
+export type KeyId = (typeof BUILTIN)[number]["id"] | `tab.${string}` | `action.${string}`;
 
 /** The commands by id. A tab's or an action's comes when it is registered (a plugin's may come late). */
-const commands = new Map(BUILTIN.map((c) => [c.id, c]));
+const commands = new Map<string, KeyCommand>(BUILTIN.map((c) => [c.id, c]));
 const [registered, setRegistered] = createSignal(0);
 
 /** Adds a command (or replaces the one with its id): its keys are bound and shown by its id. */
@@ -138,8 +141,8 @@ export function keyCommands(): KeyCommand[] {
 // Keys as the settings write them
 // ---------------------------------------------------------------------------------------------
 
-/** In the order the code writes them. */
-const MODIFIERS = ["mod", "ctrl", "meta", "alt", "shift"];
+/** In the order a key is written with them (`lib/hotkeys` writes keydowns so too). */
+export const MODIFIERS: readonly string[] = ["mod", "ctrl", "meta", "alt", "shift"];
 /** The modifiers by the names the settings may give them ("meta" is the Windows / Super key, off macOS). */
 const MODIFIER_NAMES: Record<string, string> = { mod: "mod", cmd: "mod", command: "mod", ctrl: "ctrl", control: "ctrl", meta: "meta", alt: "alt", option: "alt", opt: "alt", shift: "shift" };
 /** Keys with a name, as a keydown names them (`KeyboardEvent.key` in lowercase; " " is "space"). */
@@ -235,7 +238,7 @@ export const keymap = globalMemo(
 );
 
 /** A command's keys now (reactive); none where the settings took them away, or for no such command. */
-export const keysOf = (id: string): readonly string[] => keymap().get(id) ?? NONE;
+export const keysOf = (id: KeyId): readonly string[] => keymap().get(id) ?? NONE;
 
 /** The first of a command's keys: the one shown where there is room for one. */
-export const keyOf = (id: string): string | undefined => keysOf(id)[0];
+export const keyOf = (id: KeyId): string | undefined => keysOf(id)[0];

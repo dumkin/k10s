@@ -2,7 +2,7 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-j
 import { Portal } from "solid-js/web";
 import { bind, comboLabel } from "../lib/hotkeys";
 import { holdInert, restoreFocus } from "../lib/inert";
-import { keysOf } from "../lib/keymap";
+import { type KeyId, keysOf } from "../lib/keymap";
 import { namespaceKeys } from "../state/nav";
 import { helpOpen, setHelpOpen } from "../state/ui";
 import { Icon } from "./Icon";
@@ -131,6 +131,9 @@ export const SHORTCUTS: ShortcutGroup[] = [
 /** What the keys of a row show, in order: key caps, and the marks between them. */
 type KeyPart = { kbd: string } | { sep: string };
 
+/** The keys of the command a token names (`@logs.wrap`); the sheet's test checks that each one exists. */
+const commandKeys = (token: string) => keysOf(token.slice(1) as KeyId);
+
 function keyParts(keys: string): KeyPart[] {
   const tokens = keys.split(/\s+/);
   const oneCommand = tokens.filter((t) => t.startsWith("@")).length === 1;
@@ -140,7 +143,7 @@ function keyParts(keys: string): KeyPart[] {
     else if (token === "…") out.push({ sep: "…" });
     else if (token.startsWith("hold:")) out.push({ sep: "hold" }, { kbd: comboLabel(token.slice(5)) });
     else if (token.startsWith("@")) {
-      const combos = keysOf(token.slice(1)).slice(0, oneCommand ? undefined : 1);
+      const combos = commandKeys(token).slice(0, oneCommand ? undefined : 1);
       // None: the settings took them away.
       if (!combos.length) out.push({ sep: "—" });
       combos.forEach((combo, i) => {
@@ -157,7 +160,7 @@ const rowCombos = (keys: string) =>
   keys
     .split(/\s+/)
     .filter((t) => t !== "|" && t !== "…")
-    .flatMap((t) => (t.startsWith("@") ? keysOf(t.slice(1)) : [t.replace(/^hold:/, "")]));
+    .flatMap((t) => (t.startsWith("@") ? commandKeys(t) : [t.replace(/^hold:/, "")]));
 
 /** Words of a row to search in: what it does and its keys as written and as shown, for "logs", "⌘K", "shift". */
 const haystack = (row: ShortcutRow) => `${row.text} ${rowCombos(row.keys).map((c) => `${c} ${comboLabel(c)}`).join(" ")}`.toLowerCase();

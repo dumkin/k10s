@@ -554,6 +554,20 @@ describe("keys from settings.json", () => {
     expect(ui.dialog()).toBeNull();
   });
 
+  it("come with the tabs and actions registered after the view mounted", async () => {
+    const { nav } = await withFile();
+    const { registerAction } = await import("../registry/actions");
+    const { registerDetailTab } = await import("../registry/details");
+    const ran: string[] = [];
+    registerAction({ id: "probe", title: "Probe", icon: "info", shortcut: "alt+p", applies: () => true, run: (ctx) => void ran.push(ctx.rows[0].n) });
+    registerDetailTab({ id: "probe", title: "Probe", icon: "info", shortcut: "alt+t", order: 99, when: () => true, component: () => null });
+    nav.setSelectedKey("z1/pod-3");
+    key({ key: "p", code: "KeyP", altKey: true });
+    expect(ran).toEqual(["pod-3"]);
+    key({ key: "t", code: "KeyT", altKey: true });
+    expect([nav.detailsOpen(), nav.detailsTab()]).toEqual([true, "probe"]);
+  });
+
   it("run the action of a tab's key on several marked rows, and name the keys in the marks' toolbar", async () => {
     const { nav, edit } = await withFile();
     nav.setMarked(new Set(["z1/pod-1", "z1/pod-2"]));

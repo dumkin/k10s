@@ -1,11 +1,10 @@
 import { createMemo, createSignal, For, type JSX, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { Icon } from "../../components/Icon";
-import { Kbd } from "../../components/Kbd";
 import { Popover } from "../../components/Popover";
 import { type Change, changes, type CompareOptions, deepEqual, type Hide, isSecret, pairDiff, type Path, pathText, secretText, strip, yamlLines } from "../../lib/compare/diff";
 import { ADD, DEL, editScript } from "../../lib/compare/myers";
 import { isBlock, isMap, isNested, type Json } from "../../lib/compare/yaml";
-import { comboLabel, keyed } from "../../lib/hotkeys";
+import { comboLabel, keyed, keyLabel } from "../../lib/hotkeys";
 import { isError } from "../../lib/k8s";
 import type { DetailProps } from "../../registry/details";
 import { clusterColor, contexts, discoveredResources, selectedClusters, shortName } from "../../state/clusters";
@@ -461,10 +460,25 @@ export function CompareTab(props: DetailProps) {
                 {props.row.ns ? ` (namespace ${props.row.ns})` : ""}.
               </p>
             </Show>
-            <p>
-              Mark rows with <span class="kbd">{comboLabel("space")}</span> and press <Kbd id="tab.compare" /> to compare them. Or pin an object with <Kbd id="action.compare-pin" /> — of any cluster,
-              namespace or kind: Compare on any other object compares it with that one.
-            </p>
+            <Show when={keyLabel("tab.compare") || keyLabel("action.compare-pin")}>
+              <p>
+                <Show when={keyLabel("tab.compare")}>
+                  {(compare) => (
+                    <>
+                      Mark rows with <span class="kbd">{comboLabel("space")}</span> and press <span class="kbd">{compare()}</span> to compare them.{" "}
+                    </>
+                  )}
+                </Show>
+                <Show when={keyLabel("action.compare-pin")}>
+                  {(pin) => (
+                    <>
+                      {keyLabel("tab.compare") ? "Or pin" : "Pin"} an object with <span class="kbd">{pin()}</span> — of any cluster, namespace or kind: Compare on any other object
+                      compares it with that one.
+                    </>
+                  )}
+                </Show>
+              </p>
+            </Show>
             <button class="btn sm" onClick={(e) => setPickAt(e.currentTarget)}>
               <Icon name="plus" size={12} />
               {props.row.n} in another cluster…

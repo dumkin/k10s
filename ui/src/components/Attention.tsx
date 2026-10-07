@@ -434,13 +434,16 @@ export function AttentionView() {
           </div>
         </Show>
         <div class="att-help faint">
-          <Kbd id="attention.down" />
-          <Kbd id="attention.up" /> move · <span class="kbd">↵</span> open · <span class="kbd">space</span> show objects
+          <Show when={keyLabel("attention.down") || keyLabel("attention.up")}>
+            <Kbd id="attention.down" />
+            <Kbd id="attention.up" /> move ·{" "}
+          </Show>
+          <span class="kbd">↵</span> open · <span class="kbd">space</span> show objects
           <Show when={keyLabel("nav.back")}>
             {(back) => (
               <>
-                {" "}
-                · <span class="kbd">{back()}</span> back here from an object
+                {" · "}
+                <span class="kbd">{back()}</span> back here from an object
               </>
             )}
           </Show>

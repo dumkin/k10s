@@ -111,7 +111,7 @@ A command's keys can be others: give them in `settings.json` (⌘K → **Open se
 }
 ```
 
-A key is written like `mod+shift+k`: `mod` is `⌘` on macOS and `Ctrl` elsewhere, `ctrl` is `⌃` on macOS (and `Ctrl` elsewhere), then `alt`, `shift`, and a character or the name of a key (`/`, `?`, `f6`, `escape`, `space`, `arrowleft`, `pagedown`, `backspace`). A symbol is written as it is typed: `?`, not `shift+/`. A list gives a command several keys; `null` or `[]` takes them all away. A key k10s can't read leaves the command its own keys.
+A key is written like `mod+shift+k`: `mod` is `⌘` on macOS and `Ctrl` elsewhere, `ctrl` is `⌃` on macOS (and `Ctrl` elsewhere), then `alt`, `shift`, and a character or the name of a key (`/`, `?`, `f6`, `escape`, `space`, `arrowleft`, `pagedown`, `backspace`). Case doesn't matter, so Shift is written out: what the tables above call `G` is `shift+g` (`"G"` is plain `g`). A symbol is written as it is typed: `?`, not `shift+/`. A list gives a command several keys; `null` or `[]` takes them all away. A key k10s can't read leaves the command its own keys.
 
 | Group | Commands |
 | --- | --- |

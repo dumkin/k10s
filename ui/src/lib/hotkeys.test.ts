@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { KeyId } from "./keymap";
 
 type Hotkeys = typeof import("./hotkeys");
 
@@ -282,7 +283,7 @@ describe("commands of the keymap", () => {
 describe("labels of commands' keys", () => {
   it("say the key the settings give a command, or nothing", async () => {
     const { keyLabel, withKeys, keyed } = await withSettings({ keys: { logs: { wrap: "alt+w", pause: null } } }, "MacIntel");
-    expect([keyLabel("logs.wrap"), keyLabel("logs.pause"), keyLabel("app.zoom-in"), keyLabel("nope")]).toEqual(["⌥W", undefined, "⌘=", undefined]);
+    expect([keyLabel("logs.wrap"), keyLabel("logs.pause"), keyLabel("app.zoom-in"), keyLabel("nope" as KeyId)]).toEqual(["⌥W", undefined, "⌘=", undefined]);
     expect([withKeys("Wrap lines", "logs.wrap"), withKeys("Pause", "logs.pause"), withKeys("Previous match", "yaml.previous-match", "shift+enter"), withKeys("Pause", "logs.pause", "escape")]).toEqual([
       "Wrap lines (⌥W)",
       "Pause",

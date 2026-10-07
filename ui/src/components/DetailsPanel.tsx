@@ -1,7 +1,7 @@
 import { type Accessor, createEffect, createMemo, createSignal, For, Index, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { age } from "../lib/format";
-import { type Binding, bindAll, keyLabel, withKeys } from "../lib/hotkeys";
+import { type Binding, bindAll, keyed, keyLabel, withKeys } from "../lib/hotkeys";
 import { keyOf } from "../lib/keymap";
 import { splitterKeyDown } from "../lib/splitter";
 import { type ActionContext, actionKeyId, actionLabel, actionsFor, actionTitle, type ResourceAction } from "../registry/actions";
@@ -262,7 +262,7 @@ export function DetailsPanel() {
               <button
                 class="btn ghost icon"
                 classList={{ on: detailsFull() }}
-                title={detailsFull() ? withKeys("Back to the table", "details.full", "escape") : withKeys("Full view — more room for logs and YAML", "details.full")}
+                title={detailsFull() ? `Back to the table (${keyed("details.full", (k) => `${k} or `)}Esc)` : withKeys("Full view — more room for logs and YAML", "details.full")}
                 aria-label={detailsFull() ? "Back to the table" : "Full view"}
                 aria-pressed={detailsFull()}
                 data-hint={keyOf("details.full")}

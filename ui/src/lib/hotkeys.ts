@@ -1,4 +1,4 @@
-import { keymap, keyOf, keysOf } from "./keymap";
+import { type KeyId, keymap, keyOf, keysOf, MODIFIERS } from "./keymap";
 import { isMac } from "./platform";
 
 // Global keyboard shortcuts. Combos: "mod+k" (⌘ on macOS, Ctrl elsewhere), "shift+r", "ctrl+d",
@@ -11,11 +11,13 @@ import { isMac } from "./platform";
 
 export { isMac };
 
-export interface Binding {
-  /** A key of its own: one the settings don't change (an arrow, Enter, Esc…). */
-  combo?: string;
-  /** A command of the keymap, whose keys it takes (`logs.wrap`). One of the two. */
-  id?: string;
+/**
+ * What a key does: a key of its own (`combo`: one the settings don't change, an arrow, Enter, Esc…), or a command of
+ * the keymap (`id`: `logs.wrap`, whose keys are the settings' now).
+ */
+export type Binding = BindingOptions & ({ combo: string; id?: never } | { id: KeyId; combo?: never });
+
+interface BindingOptions {
   run: (e: KeyboardEvent) => void | boolean;
   when?: () => boolean;
   inInputs?: boolean;
@@ -37,7 +39,6 @@ let byCombo: Map<string, Binding[]> | null = null;
 /** The keymap `byCombo` was made with. */
 let byComboKeys: ReturnType<typeof keymap> | null = null;
 
-const MODIFIERS = ["mod", "ctrl", "meta", "alt", "shift"];
 const canonicalCache = new Map<string, string>();
 
 /** One spelling per combo: modifiers in a fixed order, and "ctrl" folded into "mod" off macOS. */
@@ -165,13 +166,16 @@ function bindingsByCombo(): Map<string, Binding[]> {
   const keys = keymap();
   if (byCombo && byComboKeys === keys) return byCombo;
   const out = new Map<string, Binding[]>();
+  const add = (b: Binding, combo: string) => {
+    const key = canonicalCombo(combo);
+    const list = out.get(key);
+    if (!list) out.set(key, [b]);
+    // Once per combo: "ctrl+d" and "mod+d" are one key off macOS (a binding's own keys come one after another).
+    else if (list[list.length - 1] !== b) list.push(b);
+  };
   for (const b of bindings) {
-    // Once per combo: "ctrl+d" and "mod+d" are one key off macOS.
-    for (const combo of new Set((b.id ? keysOf(b.id) : b.combo ? [b.combo] : []).map(canonicalCombo))) {
-      const list = out.get(combo);
-      if (list) list.push(b);
-      else out.set(combo, [b]);
-    }
+    if (b.combo !== undefined) add(b, b.combo);
+    else for (const combo of keysOf(b.id)) add(b, combo);
   }
   // A stable sort: equal priorities keep the order they were bound in.
   for (const list of out.values()) list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
@@ -196,9 +200,10 @@ export function installHotkeys() {
       const bound = bindingsByCombo();
       // The typed character wins over the key's US meaning, whatever the priorities.
       for (const combo of combos) {
+        // A command's key that types (a letter, "/", Space) is the field's, even where the command works in fields.
+        const fieldsOwn = typing && typesText(combo);
         for (const b of bound.get(combo) ?? []) {
-          // A command's key that types (a letter, "/", Space) is the field's, even where the command works in fields.
-          if (typing && (!b.inInputs || (b.id && typesText(combo)))) continue;
+          if (typing && (!b.inInputs || (fieldsOwn && b.id !== undefined))) continue;
           if (owned && !b.inTerminal) continue;
           if (b.when && !b.when()) continue;
           if (b.run(e) === false) continue;
@@ -231,13 +236,13 @@ export function comboLabel(combo: string): string {
 }
 
 /** The label of a command's key ("⌘K"; the first, where it has several); undefined where it has none. */
-export function keyLabel(id: string): string | undefined {
+export function keyLabel(id: KeyId): string | undefined {
   const combo = keyOf(id);
   return combo === undefined ? undefined : comboLabel(combo);
 }
 
 /** Words about a command's key, or "" where it has none: `Forward a port${keyed("action.port-forward", (k) => ` (${k})`)}`. */
-export function keyed(id: string, words: (label: string) => string): string {
+export function keyed(id: KeyId, words: (label: string) => string): string {
   const label = keyLabel(id);
   return label === undefined ? "" : words(label);
 }
@@ -246,7 +251,7 @@ export function keyed(id: string, words: (label: string) => string): string {
  * A tooltip with the key of the command it is about, and `more` keys of the control (written as combos): "Wrap lines
  * (W)", "Previous match (⇧N, ⇧↵)" — or the text alone, where there is no key.
  */
-export function withKeys(text: string, id: string, ...more: string[]): string {
+export function withKeys(text: string, id: KeyId, ...more: string[]): string {
   const keys = [keyLabel(id), ...more.map(comboLabel)].filter(Boolean);
   return keys.length ? `${text} (${keys.join(", ")})` : text;
 }
