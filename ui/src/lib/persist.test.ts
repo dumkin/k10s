@@ -176,6 +176,25 @@ describe("the app's files", () => {
     }
   });
 
+  it("spaces batches out also when the app takes each at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const { persist, batches } = await withFiles(snapshot());
+      const [, setWidth] = persist.persisted("sidebarWidth", 228, isNumber);
+      // A drag, a frame at a time: the first width goes at once, the next ones wait for their turn.
+      setWidth(240);
+      await vi.advanceTimersByTimeAsync(16);
+      setWidth(250);
+      await vi.advanceTimersByTimeAsync(16);
+      setWidth(260);
+      expect(batches).toEqual([[{ doc: "state", key: "sidebarWidth", value: 240 }]]);
+      await vi.advanceTimersByTimeAsync(persist.SEND_EVERY_MS);
+      expect(batches).toEqual([[{ doc: "state", key: "sidebarWidth", value: 240 }], [{ doc: "state", key: "sidebarWidth", value: 260 }]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the engine's settings in the file, and resets through the app", async () => {
     const { persist, reset } = await withFiles(snapshot({ theme: "light" }));
     persist.engineSettingsSaved({ readOnly: true, feedIdleTtlSecs: 180 });

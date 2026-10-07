@@ -1,6 +1,7 @@
 import { type Accessor, batch, createEffect, createMemo, createSignal, For, Index, Match, on, onCleanup, onMount, Show, type Signal, Switch, untrack } from "solid-js";
 import { age } from "../lib/format";
 import { errorTitle, isAuthFailure, isAuthFailureMessage, isError, isForbidden, isValidNamespace, normalizeNamespace } from "../lib/k8s";
+import { splitterDrag } from "../lib/splitter";
 import { columnKind } from "../registry/columns";
 import { metricsNotices } from "../state/metrics";
 import { clusterColor, clusterStatus, contexts, ensureConnected, retryCluster, selectedClusters, shortName } from "../state/clusters";
@@ -116,29 +117,10 @@ export function ResourceTable(props: {
     else setSelectedKey(row.key);
   };
 
+  // A column's width shows as it is dragged, and is saved once, when the drag ends.
   const startResize = (e: MouseEvent, col: TableColumn) => {
-    e.preventDefault();
     e.stopPropagation();
-    const startX = e.clientX;
-    const startW = col.width;
-    let width: number | null = null;
-    let frame = 0;
-    // The new width shows at most once a frame, and is saved once, when the drag ends.
-    const move = (ev: MouseEvent) => {
-      width = Math.max(48, startW + ev.clientX - startX);
-      frame ||= requestAnimationFrame(() => {
-        frame = 0;
-        if (width !== null) previewColumnWidth(col.id, width);
-      });
-    };
-    const up = () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      if (width !== null) setColumnWidth(col.id, width);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    splitterDrag({ value: () => col.width, preview: (w) => previewColumnWidth(col.id, w), set: (w) => setColumnWidth(col.id, w), min: () => 48, max: () => Infinity, grow: "ArrowRight" })(e);
   };
 
   return (

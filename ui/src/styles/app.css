@@ -437,23 +437,13 @@ textarea::placeholder {
 /* ------------------------------------------------------------------------------------------ */
 
 /*
- * The sidebar's width, set on the window: dragging its edge changes it every frame. Not inherited: when an inherited
- * custom property changes, the browser works out the styles of every element in the window again.
- */
-@property --sidebar-w {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 228px;
-}
-
-/*
  * The window: its chrome (title bar, sidebar, status bar) on the darkest surface, and the content on cards set into
- * it — the table with its details, and the dock under them — each with a hairline edge and rounded corners.
+ * it — the table with its details, and the dock under them — each with a hairline edge and rounded corners. Its
+ * columns, the sidebar as wide as it was dragged and the rest, come from App.
  */
 .app {
   display: grid;
   grid-template-rows: var(--titlebar-h) minmax(0, 1fr) var(--statusbar-h);
-  grid-template-columns: var(--sidebar-w, 228px) minmax(0, 1fr);
   height: 100vh;
   background: var(--bg);
 }
@@ -627,6 +617,17 @@ textarea::placeholder {
 .resizer.dragging::after { transition-delay: 0s; }
 .resizer:focus-visible { box-shadow: none; }
 .resizer:focus-visible::after { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/*
+ * While an edge is dragged (see splitterDrag), a layer over the window (over the table, for a column's) keeps its
+ * cursor: the edge moves once a frame, and the pointer runs ahead of it onto whatever is there, which would show its
+ * own cursor and hover (over a scrollbar, WebKit shows the arrow whatever the CSS).
+ */
+.resizer.dragging,
+.dock-resizer.dragging,
+.col-resize.dragging { z-index: 1000; }
+.resizer.dragging::before,
+.dock-resizer.dragging::before,
+.col-resize.dragging::before { content: ""; position: fixed; inset: 0; }
 
 /* The table and its details over the dock (terminals, port-forwards): two cards with the chrome between them. */
 .workspace {
@@ -695,9 +696,9 @@ textarea::placeholder {
 }
 .view-header .filter { flex: 0 1 300px; min-width: 150px; margin-left: auto; }
 /*
- * By the header's width: WebKit works out the styles of everything in a query container again whenever its size
- * changes, and the view (the table in it) changes width on every frame of a drag of the sidebar's edge. 532px is a
- * view 560px wide, less the header's padding.
+ * By the header's own width, not the view's: WebKit restyles everything in a query container whenever its size
+ * changes, and a drag of the sidebar's or the details' edge changes the view's width every frame. 532px is a view
+ * 560px wide, less the header's padding.
  */
 .view-header { container: view-header / inline-size; }
 @container view-header (max-width: 532px) {
@@ -1054,17 +1055,18 @@ textarea::placeholder {
 .tab .kbd { height: 16px; min-width: 16px; font-size: 10px; opacity: 0.75; }
 /*
  * The tabs give up their keys, then their icons, then their titles as the panel narrows — by the width it really has
- * (a small window caps it below the width it was dragged to), so they never run out of the strip.
+ * (a small window caps it below the width it was dragged to), so they never run out of the strip. By the strip's own
+ * width (see .view-header): a panel 760, 600 and 470px wide, less the strip's padding.
  */
-.details { container: details / inline-size; }
-@container details (max-width: 760px) {
+.tabs { container: details-tabs / inline-size; }
+@container details-tabs (max-width: 740px) {
   .tab { padding: 0 7px; gap: 5px; }
   .tab .kbd { display: none; }
 }
-@container details (max-width: 600px) {
+@container details-tabs (max-width: 580px) {
   .tab > .icon { display: none; }
 }
-@container details (max-width: 470px) {
+@container details-tabs (max-width: 450px) {
   .tab > .icon { display: block; }
   .tab .tab-title { display: none; }
 }
@@ -1207,12 +1209,11 @@ textarea::placeholder {
 /* Logs: the view (toolbar, level strip and histogram, lines, patterns) ------------------------------------- */
 .logv { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 /*
- * The bar gives up labels and toggles as the view narrows, by its own width: WebKit works out the styles of
- * everything in a query container again whenever its size changes, and the lines under the bar must not be (an edge
- * dragged, the sidebar's or the details', changes the width every frame). The widths are the view's, less the bar's
- * padding.
+ * Labels and toggles go as the view narrows, by the bar's own width (see .view-header; the view's widths, less the
+ * bar's padding). It lies over what follows it, under the details' edge (z-index 5): where a size container is a
+ * stacking context too (Safari before 18.4, Chromium before 129), the query's suggestions would go under the lines.
  */
-.logv-bar { flex-wrap: wrap; row-gap: 6px; container: logs-bar / inline-size; }
+.logv-bar { flex-wrap: wrap; row-gap: 6px; container: logs-bar / inline-size; position: relative; z-index: 4; }
 .logv-bar > select.input { max-width: 160px; }
 @container logs-bar (max-width: 740px) {
   .logv-bar .lbl-wide, .logv-bar .seg-label { display: none; }
@@ -2400,9 +2401,13 @@ textarea::placeholder {
 }
 /*
  * The terminal: xterm.js draws into it, with a little room at its edges. A narrower box cuts the screen at its edge
- * until the terminal takes the new width (it waits for the width to settle, see TerminalView).
+ * until the terminal takes the new width (it waits for the width to settle, see TerminalView): `clip`, as `hidden`
+ * can be scrolled by focusing the terminal; `hidden` where there is no `clip` (Safari 15).
  */
-.term { position: absolute; inset: 6px 0 2px 10px; overflow: clip; }
+.term { position: absolute; inset: 6px 0 2px 10px; overflow: hidden; }
+@supports (overflow: clip) {
+  .term { overflow: clip; }
+}
 .term .xterm { height: 100%; }
 .term .xterm-viewport { scrollbar-width: thin; }
 

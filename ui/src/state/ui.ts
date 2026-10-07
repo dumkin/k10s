@@ -18,8 +18,11 @@ export function zoomBy(step: 1 | -1) {
   const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (at < 0 ? ZOOM_STEPS.indexOf(1) : at) + step))];
   if (next !== uiZoom()) setUiZoom(next);
 }
+/** How narrow and how wide the sidebar may be dragged. */
+export const SIDEBAR_MIN = 180;
+export const SIDEBAR_MAX = 420;
 // Within what dragging their edges allows (see Sidebar and DetailsPanel).
-export const [sidebarWidth, setSidebarWidth] = persisted("sidebarWidth", 228, (v): v is number => isNumber(v) && v >= 180 && v <= 420);
+export const [sidebarWidth, setSidebarWidth] = persisted("sidebarWidth", 228, (v): v is number => isNumber(v) && v >= SIDEBAR_MIN && v <= SIDEBAR_MAX);
 export const [detailsWidth, setDetailsWidth] = persisted("detailsWidth", 620, (v): v is number => isNumber(v) && v >= 380);
 export const [paletteOpen, setPaletteOpen] = createSignal<false | { query: string }>(false);
 export const [pickerOpen, setPickerOpen] = createSignal<null | "clusters" | "namespaces">(null);

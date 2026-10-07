@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, type JSX, lazy, Match, on, onCleanup, onMount, Show, Suspense, Switch } from "solid-js";
 import { bindAll, isMac, keyLabel, withKeys } from "../lib/hotkeys";
-import { splitterKeyDown } from "../lib/splitter";
+import { type SplitterSpec, splitterDrag, splitterKeyDown } from "../lib/splitter";
 import { clusterColor, selectedClusters, shortName } from "../state/clusters";
 import { closeTerminal, DOCK_MIN, dockHeight, dockOpen, dockTab, setDockHeight, setDockOpen, setDockSpace, setDockTab, type TermTab, termCluster, termStatus, termTitle, termTabs } from "../state/dock";
 import { DockLogs } from "../details/logs/DockLogs";
@@ -39,24 +39,10 @@ export function registerDockPane(pane: DockPane) {
  */
 export function Dock() {
   let section!: HTMLElement;
-  const [dragging, setDragging] = createSignal(false);
-  const startResize = (e: PointerEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = dockHeight();
-    setDragging(true);
-    const move = (ev: PointerEvent) => setDockHeight(Math.min(maxHeight(), Math.max(DOCK_MIN, Math.round(startH + startY - ev.clientY))));
-    const up = () => {
-      setDragging(false);
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
   const empty = () => !termTabs().length && !panes().length;
   const maxHeight = () => Math.max(DOCK_MIN, window.innerHeight - 220);
-  const resizeKeys = splitterKeyDown({ value: dockHeight, set: setDockHeight, min: () => DOCK_MIN, max: maxHeight, grow: "ArrowUp", shrink: "ArrowDown" });
+  const edge: SplitterSpec = { value: dockHeight, set: setDockHeight, min: () => DOCK_MIN, max: maxHeight, grow: "ArrowUp", shrink: "ArrowDown" };
+  const resizeKeys = splitterKeyDown(edge);
   /** The tabs in the strip's order: panes first, then terminals (what ← → go along). */
   const tabIds = (): (number | "forwards")[] => [...panes().map((p) => p.id), ...termTabs().map((t) => t.id)];
   /**
@@ -110,7 +96,6 @@ export function Dock() {
     <section ref={section} class="dock" classList={{ hidden: !dockOpen() }} style={{ height: `${dockHeight()}px` }} aria-label="Terminals">
       <div
         class="dock-resizer"
-        classList={{ dragging: dragging() }}
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize the dock"
@@ -119,7 +104,7 @@ export function Dock() {
         aria-valuemax={maxHeight()}
         tabIndex={0}
         data-own-arrows
-        onPointerDown={startResize}
+        onPointerDown={splitterDrag(edge)}
         onKeyDown={resizeKeys}
       />
       <div class="dock-tabs" role="tablist" aria-label="Dock" data-own-arrows onKeyDown={tabKeys}>

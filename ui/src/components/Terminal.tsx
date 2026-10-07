@@ -125,15 +125,11 @@ export function TerminalView(props: { tab: TermTab; visible: boolean }) {
    * dragging the sidebar's edge or the window's changes them every few frames.
    */
   const boxResized = () => {
-    clearTimeout(settling);
-    let cols: number | undefined;
-    try {
-      cols = fit.proposeDimensions()?.cols;
-    } catch {
-      // not measurable yet
-    }
-    if (cols === undefined || cols === term.cols) refit();
-    else settling = setTimeout(refit, SETTLE_MS);
+    const dims = fit.proposeDimensions();
+    if (dims?.cols !== term.cols) {
+      clearTimeout(settling);
+      settling = setTimeout(refit, SETTLE_MS);
+    } else if (dims.rows !== term.rows) refit();
   };
 
   onMount(() => {

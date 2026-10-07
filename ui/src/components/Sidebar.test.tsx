@@ -20,7 +20,6 @@ afterEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -110,27 +109,21 @@ describe("sidebar quick keys", () => {
 });
 
 describe("sidebar edge", () => {
-  it("resizes the sidebar live, at most once a frame, within its bounds", async () => {
+  it("is dragged from where it was taken, within the sidebar's bounds", async () => {
     vi.useFakeTimers();
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16));
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
     const { ui } = await mount();
-    const save = vi.spyOn(Storage.prototype, "setItem");
-    const saved = () => save.mock.calls.filter(([key]) => key === "k10s:sidebarWidth").map(([, v]) => Number(v));
     const edge = document.querySelector<HTMLElement>(".sidebar .resizer")!;
-    edge.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: 228 }));
-    // Moves come faster than frames: the width waits for the next one, and is the last move's.
-    for (let x = 229; x <= 300; x++) window.dispatchEvent(new MouseEvent("mousemove", { clientX: x }));
-    expect(ui.sidebarWidth()).toBe(228);
-    vi.advanceTimersByTime(16);
-    expect([ui.sidebarWidth(), saved(), edge.style.left]).toEqual([300, [300], "296px"]);
-    // Let go before the next frame: the width it was let go at, at once — no wider than the widest.
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 900 }));
-    window.dispatchEvent(new MouseEvent("mouseup", { clientX: 900 }));
-    expect(ui.sidebarWidth()).toBe(420);
-    vi.advanceTimersByTime(100);
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 100 }));
-    vi.advanceTimersByTime(100);
-    expect([ui.sidebarWidth(), saved()]).toEqual([420, [300, 420]]);
+    const drag = (x: number) => {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: x, buttons: 1 }));
+      vi.advanceTimersToNextFrame();
+      return [ui.sidebarWidth(), edge.style.left];
+    };
+    // Taken 2px right of the sidebar's 228: no jump to the pointer, the width follows its moves.
+    edge.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: 230 }));
+    expect(drag(232)).toEqual([230, "226px"]);
+    expect(drag(1000)).toEqual([420, "416px"]);
+    expect(drag(0)).toEqual([180, "176px"]);
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    expect([ui.sidebarWidth(), edge.classList.contains("dragging")]).toEqual([180, false]);
   });
 });

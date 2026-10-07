@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { ResourceInfo } from "../lib/backend";
 import { bindAll, comboLabel } from "../lib/hotkeys";
-import { splitterKeyDown } from "../lib/splitter";
+import { type SplitterSpec, splitterDrag, splitterKeyDown } from "../lib/splitter";
 import { isBoolean, persisted, recordOf } from "../lib/persist";
 import { ATTENTION } from "../lib/attention";
 import { PERMISSIONS } from "../lib/permissions";
@@ -11,14 +11,13 @@ import { discoveredResources, selectedClusters } from "../state/clusters";
 import { navigate, resourceKey } from "../state/nav";
 import { mainView } from "../state/views";
 import { modalOpen } from "../state/keyboard";
-import { setSidebarWidth, sidebarWidth } from "../state/ui";
+import { setSidebarWidth, SIDEBAR_MAX, SIDEBAR_MIN, sidebarWidth } from "../state/ui";
 import { Icon } from "./Icon";
 
 /** Sidebar items on ⌘1…⌘9: the first nine shown, top to bottom (like the sessions list of a chat app). */
 const QUICK_KEYS = 9;
-/** How narrow and how wide the sidebar may be dragged (see `sidebarWidth`). */
-const MIN_W = 180;
-const MAX_W = 420;
+/** The sidebar's edge: dragged, or moved with the keys. */
+const EDGE: SplitterSpec = { value: sidebarWidth, set: setSidebarWidth, min: () => SIDEBAR_MIN, max: () => SIDEBAR_MAX, grow: "ArrowRight", shrink: "ArrowLeft" };
 
 const [collapsed, setCollapsed] = persisted<Record<string, boolean>>("sidebarCollapsed", { access: true, admin: true }, recordOf(isBoolean));
 
@@ -147,32 +146,7 @@ export function Sidebar() {
     );
   };
 
-  const startResize = (e: MouseEvent) => {
-    e.preventDefault();
-    const target = e.currentTarget as HTMLElement;
-    target.classList.add("dragging");
-    let width: number | null = null;
-    let frame = 0;
-    // The new width shows at most once a frame. Mouse events come faster than frames, and WebKit lays the window out
-    // before each one (to find what is under the pointer) when something changed since: one layout per event.
-    const move = (ev: MouseEvent) => {
-      width = Math.max(MIN_W, Math.min(MAX_W, ev.clientX));
-      frame ||= requestAnimationFrame(() => {
-        frame = 0;
-        if (width !== null) setSidebarWidth(width);
-      });
-    };
-    const up = () => {
-      cancelAnimationFrame(frame);
-      target.classList.remove("dragging");
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      if (width !== null) setSidebarWidth(width);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-  const resizeKeys = splitterKeyDown({ value: sidebarWidth, set: setSidebarWidth, min: () => MIN_W, max: () => MAX_W, grow: "ArrowRight", shrink: "ArrowLeft" });
+  const resizeKeys = splitterKeyDown(EDGE);
 
   let nav!: HTMLElement;
   let filterInput!: HTMLInputElement;
@@ -283,10 +257,10 @@ export function Sidebar() {
         aria-orientation="vertical"
         aria-label="Resize the sidebar"
         aria-valuenow={sidebarWidth()}
-        aria-valuemin={MIN_W}
-        aria-valuemax={MAX_W}
+        aria-valuemin={SIDEBAR_MIN}
+        aria-valuemax={SIDEBAR_MAX}
         tabIndex={0}
-        onMouseDown={startResize}
+        onMouseDown={splitterDrag(EDGE)}
         onKeyDown={(e) => {
           e.stopPropagation();
           resizeKeys(e);

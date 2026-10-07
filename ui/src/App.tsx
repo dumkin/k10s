@@ -18,13 +18,13 @@ import { ATTENTION } from "./lib/attention";
 import { PERMISSIONS } from "./lib/permissions";
 import { needsWelcome } from "./state/clusters";
 import { resourceKey } from "./state/nav";
-import { dockSpace } from "./state/dock";
 import { setHelpOpen, setPaletteOpen, setSettingsOpen, sidebarWidth } from "./state/ui";
 
 export function App(props: { version: string }) {
   return (
-    // `--dock-space`: room the dock takes under the table (a full view of the details stays above it).
-    <div class="app" style={{ "--sidebar-w": `${sidebarWidth()}px`, "--dock-space": `${dockSpace()}px` }}>
+    // The sidebar's width goes straight to the grid: a custom property set here would be inherited by every element,
+    // and each frame of a drag of the sidebar's edge would restyle them all.
+    <div class="app" style={{ "grid-template-columns": `${sidebarWidth()}px minmax(0, 1fr)` }}>
       <Boundary where="the title bar">
         <TitleBar />
       </Boundary>

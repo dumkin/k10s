@@ -76,29 +76,29 @@ describe("ResourceTable", () => {
 
   it("resizes a column live, at most once a frame, without sorting again, and saves the width once", () => {
     vi.useFakeTimers();
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16));
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
-    const save = vi.spyOn(Storage.prototype, "setItem");
-    const rows = Array.from({ length: 50 }, (_, i) => ({ key: `z1/w-${i}`, cl: "prod-eu-z1", u: `w-${i}`, n: `w-${i}`, ns: "default", rv: "1", t: 0, s: Tone.Ok, c: [[i % 2 ? "True" : "False", Tone.Ok]] }) as never);
-    const model = mount({}, () => rows);
-    const sorted = model.sorted();
-    const width = () => model.columns().find((c) => c.id === "pc_ready_status")!.width;
-    const start = width();
-    const handle = [...document.querySelectorAll(".th")].find((el) => el.textContent === "Ready")!.querySelector(".col-resize")!;
-    handle.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 500 }));
-    for (let x = 501; x <= 540; x++) window.dispatchEvent(new MouseEvent("mousemove", { clientX: x }));
-    expect(width()).toBe(start);
-    vi.advanceTimersByTime(16);
-    expect(width()).toBe(start + 40);
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 560 }));
-    window.dispatchEvent(new MouseEvent("mouseup", { clientX: 560 }));
-    vi.advanceTimersByTime(100);
-    expect(width()).toBe(start + 60);
-    expect(model.sorted()).toBe(sorted);
-    expect(save.mock.calls.filter(([key]) => key === "k10s:colWidths")).toHaveLength(1);
-    save.mockRestore();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
+    try {
+      const save = vi.spyOn(Storage.prototype, "setItem");
+      const rows = Array.from({ length: 50 }, (_, i) => ({ key: `z1/w-${i}`, cl: "prod-eu-z1", u: `w-${i}`, n: `w-${i}`, ns: "default", rv: "1", t: 0, s: Tone.Ok, c: [[i % 2 ? "True" : "False", Tone.Ok]] }) as never);
+      const model = mount({}, () => rows);
+      const sorted = model.sorted();
+      const width = () => model.columns().find((c) => c.id === "pc_ready_status")!.width;
+      const start = width();
+      const handle = [...document.querySelectorAll(".th")].find((el) => el.textContent === "Ready")!.querySelector(".col-resize")!;
+      handle.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: 500 }));
+      for (let x = 501; x <= 540; x++) window.dispatchEvent(new MouseEvent("mousemove", { clientX: x, buttons: 1 }));
+      expect(width()).toBe(start);
+      vi.advanceTimersToNextFrame();
+      expect(width()).toBe(start + 40);
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 560, buttons: 1 }));
+      window.dispatchEvent(new MouseEvent("mouseup", { clientX: 560 }));
+      vi.advanceTimersByTime(100);
+      expect(width()).toBe(start + 60);
+      expect(model.sorted()).toBe(sorted);
+      expect(save.mock.calls.filter(([key]) => key === "k10s:colWidths")).toHaveLength(1);
+      save.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

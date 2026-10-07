@@ -3,11 +3,12 @@ import { Dynamic } from "solid-js/web";
 import { age } from "../lib/format";
 import { type Binding, bindAll, keyed, keyLabel, withKeys } from "../lib/hotkeys";
 import { keyOf } from "../lib/keymap";
-import { splitterKeyDown } from "../lib/splitter";
+import { type SplitterSpec, splitterDrag, splitterKeyDown } from "../lib/splitter";
 import { type ActionContext, actionKeyId, actionLabel, actionsFor, actionTitle, type ResourceAction } from "../registry/actions";
 import { catalogEntry } from "../registry/catalog";
 import { type DetailTab, DetailReadyContext, tabKeyId, tabsFor } from "../registry/details";
 import { clusterColor } from "../state/clusters";
+import { dockSpace } from "../state/dock";
 import { detailsHaveKeyboard, onControl } from "../state/keyboard";
 import { closeDetails, currentResource, detailsFull, detailsTab, marked, objectRef, resourceKey, selectedKey, setDetailsFull, setDetailsTab } from "../state/nav";
 import { detailsWidth, now, setDetailsWidth } from "../state/ui";
@@ -172,22 +173,8 @@ export function DetailsPanel() {
     ),
   );
 
-  const [resizing, setResizing] = createSignal(false);
-  const startResize = (e: MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = detailsWidth();
-    setResizing(true);
-    const move = (ev: MouseEvent) => setDetailsWidth(Math.max(MIN_WIDTH, Math.min(maxWidth(), startW + startX - ev.clientX)));
-    const up = () => {
-      setResizing(false);
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-  const resizeKeys = splitterKeyDown({ value: detailsWidth, set: setDetailsWidth, min: () => MIN_WIDTH, max: maxWidth, grow: "ArrowLeft", shrink: "ArrowRight" });
+  const edge: SplitterSpec = { value: detailsWidth, set: setDetailsWidth, min: () => MIN_WIDTH, max: maxWidth, grow: "ArrowLeft", shrink: "ArrowRight" };
+  const resizeKeys = splitterKeyDown(edge);
 
   /** ← / → (Home, End) along the tabs: to the previous / next one, which opens at once. */
   const tabKeys = (e: KeyboardEvent) => {
@@ -212,13 +199,14 @@ export function DetailsPanel() {
           class="details"
           aria-label={`${kind()} ${r().n}`}
           // Tabs give up their keys, icons and titles as the panel narrows (CSS container queries; tooltips keep them).
+          // A full view stays above the room the dock takes (`--dock-space`, on the panel alone: on the window, each frame
+          // of a drag of the dock's edge would restyle every element).
           classList={{ full: detailsFull() }}
-          style={detailsFull() ? undefined : { width: `${detailsWidth()}px` }}
+          style={detailsFull() ? { "--dock-space": `${dockSpace()}px` } : { width: `${detailsWidth()}px` }}
         >
           <Show when={!detailsFull()}>
             <div
               class="resizer"
-              classList={{ dragging: resizing() }}
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize the details"
@@ -227,7 +215,7 @@ export function DetailsPanel() {
               aria-valuemax={maxWidth()}
               tabIndex={0}
               data-own-arrows
-              onMouseDown={startResize}
+              onMouseDown={splitterDrag(edge)}
               onKeyDown={resizeKeys}
             />
           </Show>

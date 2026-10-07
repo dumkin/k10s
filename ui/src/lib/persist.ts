@@ -87,7 +87,7 @@ const [settingsRevision, bumpSettings] = createSignal(0, { equals: false });
 
 /**
  * At most this often a batch of changes goes to the app. A dragged panel edge changes its width on every frame: only
- * the latest of each value goes, in the next batch.
+ * the latest of each value goes, in the next batch — also when the app takes a batch faster than a frame.
  */
 export const SEND_EVERY_MS = 50;
 
@@ -111,7 +111,7 @@ async function pump() {
       console.error("[k10s] could not keep the settings:", e);
     }
     const wait = SEND_EVERY_MS - (performance.now() - started);
-    if (unsent.size && wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
   }
   sending = false;
 }
