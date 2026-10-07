@@ -1,23 +1,22 @@
 import { batch, createEffect, createMemo, createSignal, For, Index, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import type { Column } from "../lib/backend";
-import { type Binding, bindAll, comboLabel, isMac } from "../lib/hotkeys";
+import { type Binding, bindAll, comboLabel, isMac, withKeys } from "../lib/hotkeys";
 import { isAuthFailure, isAuthFailureMessage, isError, isForbidden } from "../lib/k8s";
-import { type ActionContext, actionsFor, actionTitle } from "../registry/actions";
+import { keyOf } from "../lib/keymap";
+import { type ActionContext, actionKeyId, actionsFor, actionTitle, allActions } from "../registry/actions";
 import { catalogEntry } from "../registry/catalog";
 import { extraColumns } from "../registry/columns";
-import { tabsFor } from "../registry/details";
+import { allDetailTabs, tabKeyId, tabsFor } from "../registry/details";
 import { clusterColor, clusterStatus, ensureConnected, isMultiCluster, retryCluster, selectedClusters, shortName } from "../state/clusters";
 import { type Command, registerCommands } from "../state/commands";
 import { focusInSidebar, modalOpen, onControl, tableHasKeyboard } from "../state/keyboard";
 import {
-  BACK_COMBO,
   clearMarks,
   closeDetails,
   currentResource,
   detailsFull,
   detailsOpen,
   filter,
-  FORWARD_COMBO,
   goBack,
   goForward,
   marked,
@@ -46,6 +45,7 @@ import { mainView, selection } from "../state/views";
 import { ActionMenuItems } from "./ActionMenu";
 import { DetailsPanel } from "./DetailsPanel";
 import { Icon } from "./Icon";
+import { Kbd } from "./Kbd";
 import { addHintPanel } from "./KeyHints";
 import { Popover } from "./Popover";
 import { ResourceTable, type TableHandle } from "./ResourceTable";
@@ -128,20 +128,20 @@ export function ResourceView() {
   onMount(() => {
     const page = () => table?.pageSize() ?? 20;
     const base: (Binding & { anywhere?: boolean })[] = [
-      { combo: "j", run: () => moveBy(1) },
+      { id: "table.down", run: () => moveBy(1) },
       { combo: "arrowdown", run: () => moveBy(1) },
-      { combo: "k", run: () => moveBy(-1) },
+      { id: "table.up", run: () => moveBy(-1) },
       { combo: "arrowup", run: () => moveBy(-1) },
       { combo: "pagedown", run: () => moveBy(page()) },
       { combo: "pageup", run: () => moveBy(-page()) },
-      { combo: "g", run: () => moveBy(-Infinity) },
+      { id: "table.first", run: () => moveBy(-Infinity) },
       { combo: "home", run: () => moveBy(-Infinity) },
-      { combo: "shift+g", run: () => moveBy(Infinity) },
+      { id: "table.last", run: () => moveBy(Infinity) },
       { combo: "end", run: () => moveBy(Infinity) },
       // With ⇧: marking the rows on the way, as ⇧J / ⇧K pick lines in the logs.
-      { combo: "shift+j", run: () => markBy(1) },
+      { id: "table.mark-down", run: () => markBy(1) },
       { combo: "shift+arrowdown", run: () => markBy(1) },
-      { combo: "shift+k", run: () => markBy(-1) },
+      { id: "table.mark-up", run: () => markBy(-1) },
       { combo: "shift+arrowup", run: () => markBy(-1) },
       { combo: "shift+pagedown", run: () => markBy(page()) },
       { combo: "shift+pageup", run: () => markBy(-page()) },
@@ -169,13 +169,13 @@ export function ResourceView() {
       // The context menu without the mouse, as on every desktop: ⇧F10 and the menu key.
       { combo: "shift+f10", run: () => openMenuByKey() },
       { combo: "contextmenu", run: () => openMenuByKey() },
-      { combo: "/", run: () => filterInput?.focus() },
+      { id: "table.filter", run: () => filterInput?.focus() },
       // ⌘F for those who don't think in k9s: the same filter, also from another field.
-      { combo: "mod+f", inInputs: true, run: () => (filterInput?.focus(), filterInput?.select()) },
+      { id: "table.filter-anywhere", inInputs: true, run: () => (filterInput?.focus(), filterInput?.select()) },
       // k9s: Shift+N / Shift+A sort by name / age, again for the reverse order.
-      { combo: "shift+n", run: () => toggleSort("name") },
+      { id: "table.sort-name", run: () => toggleSort("name") },
       {
-        combo: "shift+a",
+        id: "table.sort-age",
         run: () => {
           const col = ageColumn();
           if (!col) return false;
@@ -214,7 +214,7 @@ export function ResourceView() {
         },
       },
       // Full view of the details (k9s's logs fullscreen key): the table and sidebar go under it.
-      { combo: "f", anywhere: true, run: () => toggleDetailsFull() },
+      { id: "details.full", anywhere: true, run: () => toggleDetailsFull() },
       {
         combo: "escape",
         inInputs: true,
@@ -247,30 +247,26 @@ export function ResourceView() {
     ];
     // Back / forward through views (resource, namespaces, filter, selection, details): ⌘[ ⌘] on macOS,
     // Alt+← / Alt+→ elsewhere, like browsers. Mouse back/forward buttons are handled below.
-    for (const [combo, go] of [
-      [BACK_COMBO, goBack],
-      [FORWARD_COMBO, goForward],
-    ] as const) {
-      base.push({ combo, inInputs: true, anywhere: true, run: () => void go() });
-    }
+    base.push({ id: "nav.back", inInputs: true, anywhere: true, run: () => void goBack() });
+    base.push({ id: "nav.forward", inInputs: true, anywhere: true, run: () => void goForward() });
     // A details tab by its key: d r l e y = for objects (Overview, Relations, Logs, Events, YAML, Compare), d v m h for
-    // Helm releases.
-    for (const key of ["d", "r", "l", "e", "y", "=", "v", "m", "h"]) {
+    // Helm releases. Tabs that share a key go by the resource: the one it has opens.
+    for (const tab of allDetailTabs()) {
       base.push({
-        combo: key,
+        id: tabKeyId(tab),
         anywhere: true,
         run: () => {
-          // L on several marked rows (in the table): their logs together, in the dock; = compares them.
-          if ((key === "l" || key === "=") && tableFocused() && actionCtx().rows.length > 1) {
-            const action = actionsFor(actionCtx()).find((a) => a.id === (key === "l" ? "logs" : "compare"));
+          // L on several marked rows (in the table): their logs together, in the dock; = compares them — the action
+          // that goes by the tab's key.
+          if (tableFocused() && actionCtx().rows.length > 1) {
+            const action = actionsFor(actionCtx()).find((a) => a.tab === tab.id);
             if (action) {
               void action.run(actionCtx());
               return;
             }
           }
           const k = selectedKey();
-          const tab = tabsFor(resourceKey(), currentResource()).find((t) => t.shortcut === key);
-          if (!k || !tab) return false;
+          if (!k || !tabsFor(resourceKey(), currentResource()).some((t) => t.id === tab.id)) return false;
           batch(() => {
             openDetails(k);
             setDetailsTab(tab.id);
@@ -278,12 +274,14 @@ export function ResourceView() {
         },
       });
     }
-    // Action shortcuts (restart, scale, delete, copy…) resolve against the current selection.
-    for (const combo of ["shift+r", "shift+s", "ctrl+d", "mod+backspace", "c", "s", "a", "shift+f", "+"]) {
+    // Action keys (restart, scale, delete, copy…) act on the current selection. Actions that share a key go by the
+    // resource: the first that applies runs.
+    for (const action of allActions()) {
+      if (action.tab) continue;
       base.push({
-        combo,
+        id: actionKeyId(action),
         run: () => {
-          const a = actionsFor(actionCtx()).find((x) => x.shortcut === combo || (combo === "mod+backspace" && x.id === "delete"));
+          const a = actionsFor(actionCtx()).find((x) => x.id === action.id);
           if (!a) return false;
           void a.run(actionCtx());
         },
@@ -320,7 +318,7 @@ export function ResourceView() {
         keywords: ["sort", "order", c.id],
         checked: on,
         hint: on ? (cur.desc ? "descending" : "ascending") : undefined,
-        shortcut: c.id === "name" ? "shift+n" : c.id === ageColumn() ? "shift+a" : undefined,
+        shortcut: c.id === "name" ? keyOf("table.sort-name") : c.id === ageColumn() ? keyOf("table.sort-age") : undefined,
         run: () => toggleSort(c.id),
       });
     }
@@ -365,7 +363,7 @@ export function ResourceView() {
         section: "View",
         icon: detailsFull() ? "minimize" : "maximize",
         keywords: ["maximize", "fullscreen", "expand", "logs", "yaml", "zoom"],
-        shortcut: "f",
+        shortcut: keyOf("details.full"),
         run: () => void toggleDetailsFull(),
       });
     return out;
@@ -417,7 +415,7 @@ export function ResourceView() {
               )}
             </Show>
           </div>
-          <div class="filter search-field" data-hint="/" data-hint-ctx="table">
+          <div class="filter search-field" data-hint={keyOf("table.filter")} data-hint-ctx="table">
             <Icon name="filter" size={13} />
             <input
               ref={filterInput}
@@ -429,7 +427,7 @@ export function ResourceView() {
               onInput={(e) => setFilter(e.currentTarget.value)}
               spellcheck={false}
             />
-            <Show when={filter()} fallback={<span class="kbd">/</span>}>
+            <Show when={filter()} fallback={<Kbd id="table.filter" />}>
               <button class="clear" onClick={() => setFilter("")} aria-label="Clear the filter">
                 <Icon name="x" size={12} />
               </button>
@@ -452,12 +450,8 @@ export function ResourceView() {
                     aria-label={actionTitle(a(), actionCtx())}
                     style={a().danger ? { color: "var(--err)" } : undefined}
                     onClick={() => !a().disabled && a().run(actionCtx())}
-                    title={
-                      a().disabled
-                        ? a().disabledReason
-                        : `${a().shortcut ? `${actionTitle(a(), actionCtx())} (${comboLabel(a().shortcut!)})` : actionTitle(a(), actionCtx())}${a().note ? `\n${a().note}` : ""}`
-                    }
-                    data-hint={a().disabled ? undefined : a().shortcut}
+                    title={a().disabled ? a().disabledReason : `${withKeys(actionTitle(a(), actionCtx()), actionKeyId(a()))}${a().note ? `\n${a().note}` : ""}`}
+                    data-hint={a().disabled ? undefined : keyOf(actionKeyId(a()))}
                     data-hint-ctx="table"
                     data-hint-at="below"
                   >

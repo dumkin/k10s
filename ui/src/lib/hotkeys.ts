@@ -1,12 +1,21 @@
+import { keymap, keyOf, keysOf } from "./keymap";
+import { isMac } from "./platform";
+
 // Global keyboard shortcuts. Combos: "mod+k" (⌘ on macOS, Ctrl elsewhere), "shift+r", "ctrl+d",
 // "escape", "/", "j". Bindings are scoped by an optional `when` predicate and are ignored while
 // typing in inputs unless `inInputs` is set. Off macOS there is no separate Control: "ctrl+d" means
 // the same as "mod+d" (Ctrl+D), so a binding written for macOS's ⌃ still fires there.
+//
+// A binding is for a key (`combo`) or for a command of the keymap (`id`, see `lib/keymap`): then its keys are the
+// command's, as the settings have them now — a key changed there works at once, and the old one no longer does.
 
-export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+export { isMac };
 
 export interface Binding {
-  combo: string;
+  /** A key of its own: one the settings don't change (an arrow, Enter, Esc…). */
+  combo?: string;
+  /** A command of the keymap, whose keys it takes (`logs.wrap`). One of the two. */
+  id?: string;
   run: (e: KeyboardEvent) => void | boolean;
   when?: () => boolean;
   inInputs?: boolean;
@@ -22,9 +31,11 @@ export interface Binding {
 const bindings = new Set<Binding>();
 /**
  * The bindings of each combo, the highest priority first (ties in the order bound): a keydown looks at its own combos
- * only, never sorts. Made again on the first keydown after the bindings changed.
+ * only, never sorts. Made again on the first keydown after the bindings or the keys of commands changed.
  */
 let byCombo: Map<string, Binding[]> | null = null;
+/** The keymap `byCombo` was made with. */
+let byComboKeys: ReturnType<typeof keymap> | null = null;
 
 const MODIFIERS = ["mod", "ctrl", "meta", "alt", "shift"];
 const canonicalCache = new Map<string, string>();
@@ -121,6 +132,9 @@ function inTerminal(e: KeyboardEvent): boolean {
   return !!(e.target as Element | null)?.closest?.("[data-own-keys]");
 }
 
+/** A combo that types a character into a field: a key without ⌘, Ctrl or ⌥ (Shift makes another character). */
+const typesText = (combo: string) => /^(shift\+)?(.|space)$/u.test(combo);
+
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   if (!t) return false;
@@ -148,16 +162,20 @@ export function bind(binding: Binding): () => void {
 }
 
 function bindingsByCombo(): Map<string, Binding[]> {
-  if (byCombo) return byCombo;
+  const keys = keymap();
+  if (byCombo && byComboKeys === keys) return byCombo;
   const out = new Map<string, Binding[]>();
   for (const b of bindings) {
-    const combo = canonicalCombo(b.combo);
-    const list = out.get(combo);
-    if (list) list.push(b);
-    else out.set(combo, [b]);
+    // Once per combo: "ctrl+d" and "mod+d" are one key off macOS.
+    for (const combo of new Set((b.id ? keysOf(b.id) : b.combo ? [b.combo] : []).map(canonicalCombo))) {
+      const list = out.get(combo);
+      if (list) list.push(b);
+      else out.set(combo, [b]);
+    }
   }
   // A stable sort: equal priorities keep the order they were bound in.
   for (const list of out.values()) list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  byComboKeys = keys;
   return (byCombo = out);
 }
 
@@ -179,7 +197,8 @@ export function installHotkeys() {
       // The typed character wins over the key's US meaning, whatever the priorities.
       for (const combo of combos) {
         for (const b of bound.get(combo) ?? []) {
-          if (typing && !b.inInputs) continue;
+          // A command's key that types (a letter, "/", Space) is the field's, even where the command works in fields.
+          if (typing && (!b.inInputs || (b.id && typesText(combo)))) continue;
           if (owned && !b.inTerminal) continue;
           if (b.when && !b.when()) continue;
           if (b.run(e) === false) continue;
@@ -193,8 +212,12 @@ export function installHotkeys() {
   );
 }
 
+const labelCache = new Map<string, string>();
+
 /** Pretty label for a combo: "mod+k" → "⌘K" on macOS, "Ctrl+K" elsewhere. */
 export function comboLabel(combo: string): string {
+  let out = labelCache.get(combo);
+  if (out !== undefined) return out;
   const keys = { escape: "Esc", arrowup: "↑", arrowdown: "↓", arrowleft: "←", arrowright: "→", space: "Space", pageup: "PgUp", pagedown: "PgDn", contextmenu: "Menu", delete: "Del" };
   const map: Record<string, string> = isMac
     ? { ...keys, mod: "⌘", shift: "⇧", alt: "⌥", ctrl: "⌃", enter: "↵", backspace: "⌫" }
@@ -202,5 +225,28 @@ export function comboLabel(combo: string): string {
   const parts = canonicalCombo(combo)
     .split(/\+(?!$)/)
     .map((p) => map[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1)));
-  return isMac ? parts.join("") : parts.join("+");
+  out = isMac ? parts.join("") : parts.join("+");
+  labelCache.set(combo, out);
+  return out;
+}
+
+/** The label of a command's key ("⌘K"; the first, where it has several); undefined where it has none. */
+export function keyLabel(id: string): string | undefined {
+  const combo = keyOf(id);
+  return combo === undefined ? undefined : comboLabel(combo);
+}
+
+/** Words about a command's key, or "" where it has none: `Forward a port${keyed("action.port-forward", (k) => ` (${k})`)}`. */
+export function keyed(id: string, words: (label: string) => string): string {
+  const label = keyLabel(id);
+  return label === undefined ? "" : words(label);
+}
+
+/**
+ * A tooltip with the key of the command it is about, and `more` keys of the control (written as combos): "Wrap lines
+ * (W)", "Previous match (⇧N, ⇧↵)" — or the text alone, where there is no key.
+ */
+export function withKeys(text: string, id: string, ...more: string[]): string {
+  const keys = [keyLabel(id), ...more.map(comboLabel)].filter(Boolean);
+  return keys.length ? `${text} (${keys.join(", ")})` : text;
 }

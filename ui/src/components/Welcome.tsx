@@ -1,10 +1,10 @@
 import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
 import mark from "../assets/brand/k10s-crab.svg";
 import { zoneSummary } from "../lib/clusters";
-import { comboLabel } from "../lib/hotkeys";
 import { contextNames, contexts, kubeconfigState, loadContexts, recentClusters, savedSets, setSelectedClusters, zoneFamilies } from "../state/clusters";
 import { setPickerOpen, toast } from "../state/ui";
 import { Icon } from "./Icon";
+import { Kbd } from "./Kbd";
 
 /** Quick picks shown per kind; the picker has the rest. */
 const QUICK_PICKS = 8;
@@ -124,7 +124,7 @@ function ClusterChoice() {
       <button class="btn primary" onClick={openClusterPicker}>
         <Icon name="layers" size={13} />
         Select clusters
-        <span class="kbd">{comboLabel("mod+shift+c")}</span>
+        <Kbd id="app.clusters" />
       </button>
       <Show when={sets().length}>
         <div class="cta-recent">

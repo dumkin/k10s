@@ -96,3 +96,35 @@ Actions apply to the marked rows if there are any, otherwise to the selected row
 | In a menu | `↑` `↓` (`j` `k`), `Home` / `End` move; the key shown next to an item runs it, on what the menu is for; another letter jumps to the next item that starts with it |
 
 In a terminal every key belongs to the terminal (`Esc`, `⌃C`, `⌃D`), except `⌘` shortcuts on macOS. `⌘⇧J` (`Ctrl+Shift+J`) leaves it. When a shell or attach session has ended, `↵` starts a new one.
+
+## Your own keys
+
+A command's keys can be others: give them in `settings.json` (⌘K → **Open settings.json**), under `keys`, by the group and the name of the command. k10s takes the change when its window gets the focus back: the new key works at once, the old one no longer does, and the cheat sheet, the ⌘ hints, tooltips, menus and the palette show the new one.
+
+```json
+{
+  "keys": {
+    "logs": { "wrap": "alt+w", "pause": ["s", "shift+p"] },
+    "table": { "down": "n" },
+    "action": { "delete": null }
+  }
+}
+```
+
+A key is written like `mod+shift+k`: `mod` is `⌘` on macOS and `Ctrl` elsewhere, `ctrl` is `⌃` on macOS (and `Ctrl` elsewhere), then `alt`, `shift`, and a character or the name of a key (`/`, `?`, `f6`, `escape`, `space`, `arrowleft`, `pagedown`, `backspace`). A symbol is written as it is typed: `?`, not `shift+/`. A list gives a command several keys; `null` or `[]` takes them all away. A key k10s can't read leaves the command its own keys.
+
+| Group | Commands |
+| --- | --- |
+| `app` | `palette`, `palette-new` (`⌘P`), `command` (`:`), `clusters`, `namespaces`, `help`, `settings`, `zoom-in`, `zoom-out`, `zoom-reset`, `next-area`, `previous-area` |
+| `nav` | `back`, `forward` |
+| `dock` | `toggle`, `toggle-from-terminal` |
+| `table` | `down`, `up`, `first`, `last`, `mark-down`, `mark-up`, `filter` (`/`), `filter-anywhere` (`⌘F`), `sort-name`, `sort-age` |
+| `action` | `shell`, `attach`, `node-shell`, `port-forward`, `restart`, `scale`, `delete`, `copy-name`, `compare-pin`, and, without a key of their own, `cordon`, `suspend`, `trigger`, `debug`, `helm-rollback`, `helm-uninstall` |
+| `tab` | `overview`, `relations`, `logs`, `events`, `yaml`, `compare`; for a Helm release `release`, `values`, `manifest`, `history`. The keys of `logs` and `compare` also run those actions on marked rows |
+| `details` | `full`, `down`, `up`, `top`, `bottom` |
+| `logs` | `find`, `down`, `up`, `pick-down`, `pick-up`, `first`, `last`, `next-match`, `previous-match`, `next-problem`, `previous-problem`, `pause`, `expand`, `copy`, `save`, `wrap`, `timestamps`, `pretty`, `histogram`, `previous-containers` |
+| `yaml` | `find`, `next-match`, `previous-match` |
+| `diff` | `next-change`, `previous-change` (the Compare tab's YAML) |
+| `attention` | `down`, `up`, `first`, `last`, `filter` (Needs attention) |
+
+The arrows, `PgUp` `PgDn` `Home` `End`, `↵`, `Esc`, `Space`, `Tab`, the digits (`0`–`9`, `⌥1`…, `⌘1`…), `⇧F10`, `⌘C`, `⌘A`, and the keys of menus, pickers, dialogs and the palette stay as they are.

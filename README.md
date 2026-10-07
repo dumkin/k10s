@@ -115,7 +115,7 @@ What k10s can't do, or does only in part, so that you know before you install it
 | --- | --- |
 | **Editing** | No editing, applying or creating from YAML: use kubectl for that. |
 | **Rollouts** | No rollback of Deployments (Helm rollback works), no `set image`, no drain. |
-| **Customization** | `settings.json` holds what the Settings window offers, no more: no custom actions or plugins, key remapping, aliases or JSONPath columns. |
+| **Customization** | `settings.json` holds what the Settings window offers and [the keys of commands](docs/keyboard.md#your-own-keys), no more: no custom actions or plugins, aliases or JSONPath columns. |
 | **Kubeconfig** | Reads `KUBECONFIG` or `~/.kube/config`; folders of kubeconfigs aren't scanned. |
 | **Namespaces** | A view watches at most 100 picked namespaces of a cluster, and 1,000 cluster–namespace pairs in all; the rest say they aren't watched. All namespaces counts as one. |
 | **Custom resources** | Shown as tables with their printer columns. No dedicated screens for Argo CD, Flux or cert-manager. |

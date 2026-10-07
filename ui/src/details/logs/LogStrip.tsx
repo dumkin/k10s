@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../../components/Icon";
 import { count } from "../../lib/format";
+import { withKeys } from "../../lib/hotkeys";
 import { clockOf, gapOf } from "../../lib/logs/format";
 import { histogram, type Histogram, LEVEL_SLOTS, stepLabel } from "../../lib/logs/histogram";
 import { Level, LEVEL_NAME, LEVELS } from "../../lib/logs/parse";
@@ -114,7 +115,7 @@ export function LogStrip(props: { ctx: LogCtx }) {
         <button
           class="btn sm ghost icon"
           classList={{ on: histogramOpen() && c.roomy() }}
-          title={!c.roomy() ? "The histogram shows when there is more room" : histogramOpen() ? "Hide the histogram (H)" : "Show the histogram of lines over time (H)"}
+          title={!c.roomy() ? "The histogram shows when there is more room" : withKeys(histogramOpen() ? "Hide the histogram" : "Show the histogram of lines over time", "logs.histogram")}
           onClick={() => setHistogramOpen(!histogramOpen())}
         >
           <Icon name="bars" size={12} />

@@ -2,13 +2,15 @@ import { batch, createEffect, For, on, Show } from "solid-js";
 import mark from "../assets/brand/k10s-crab.svg";
 import lockupOnLight from "../assets/brand/k10s-lockup.svg";
 import lockupOnDark from "../assets/brand/k10s-lockup-light.svg";
-import { comboLabel } from "../lib/hotkeys";
+import { withKeys } from "../lib/hotkeys";
+import { keyOf } from "../lib/keymap";
 import { clusterColor, clusterStatus, selectedClusters, shortName } from "../state/clusters";
 import { namespaces } from "../state/nav";
 import { helpOpen, paletteOpen, pickerOpen, setHelpOpen, setPaletteOpen, setPickerOpen, setSettingsOpen, setThemePref, settingsOpen, themePref } from "../state/ui";
 import { Boundary } from "./Boundary";
 import { ClusterPicker } from "./ClusterPicker";
 import { Icon } from "./Icon";
+import { Kbd } from "./Kbd";
 import { NamespacePicker } from "./NamespacePicker";
 
 /** Always mounts a fresh picker — even if a previous one was torn down abnormally. */
@@ -41,11 +43,11 @@ export function TitleBar() {
         class="picker-btn"
         classList={{ open: pickerOpen() === "clusters" }}
         onClick={() => openPicker("clusters")}
-        title={`Clusters (${comboLabel("mod+shift+c")})`}
+        title={withKeys("Clusters", "app.clusters")}
         aria-label={`Clusters: ${selectedClusters().join(", ") || "none selected"}`}
         aria-haspopup="dialog"
         aria-expanded={pickerOpen() === "clusters"}
-        data-hint="mod+shift+c"
+        data-hint={keyOf("app.clusters")}
         data-hint-at="below"
       >
         <Icon name="layers" size={14} style={{ color: "var(--text-3)" }} />
@@ -76,11 +78,11 @@ export function TitleBar() {
         class="picker-btn"
         classList={{ open: pickerOpen() === "namespaces" }}
         onClick={() => openPicker("namespaces")}
-        title={`Namespaces (${comboLabel("mod+shift+n")})`}
+        title={withKeys("Namespaces", "app.namespaces")}
         aria-label={`Namespaces: ${namespaces().join(", ") || "all"}`}
         aria-haspopup="dialog"
         aria-expanded={pickerOpen() === "namespaces"}
-        data-hint="mod+shift+n"
+        data-hint={keyOf("app.namespaces")}
         data-hint-at="below"
       >
         <Icon name="namespace" size={14} style={{ color: "var(--text-3)" }} />
@@ -99,12 +101,28 @@ export function TitleBar() {
 
       <div class="spacer" data-tauri-drag-region />
 
-      <button class="palette-btn" onClick={() => setPaletteOpen({ query: "" })} title={`Command palette (${comboLabel("mod+k")})`} aria-label="Command palette" aria-haspopup="dialog" data-hint="mod+k" data-hint-at="below">
+      <button
+        class="palette-btn"
+        onClick={() => setPaletteOpen({ query: "" })}
+        title={withKeys("Command palette", "app.palette")}
+        aria-label="Command palette"
+        aria-haspopup="dialog"
+        data-hint={keyOf("app.palette")}
+        data-hint-at="below"
+      >
         <Icon name="search" size={14} />
         <span class="label">Jump to anything…</span>
-        <span class="kbd">{comboLabel("mod+k")}</span>
+        <Kbd id="app.palette" />
       </button>
-      <button class="btn ghost icon" title={`Keyboard shortcuts (?)`} aria-label="Keyboard shortcuts" aria-haspopup="dialog" data-hint="?" data-hint-at="below" onClick={() => setHelpOpen(!helpOpen())}>
+      <button
+        class="btn ghost icon"
+        title={withKeys("Keyboard shortcuts", "app.help")}
+        aria-label="Keyboard shortcuts"
+        aria-haspopup="dialog"
+        data-hint={keyOf("app.help")}
+        data-hint-at="below"
+        onClick={() => setHelpOpen(!helpOpen())}
+      >
         <Icon name="keyboard" size={16} />
       </button>
       <button
@@ -118,10 +136,10 @@ export function TitleBar() {
       <button
         class="btn ghost icon"
         classList={{ on: !!settingsOpen() }}
-        title={`Settings (${comboLabel("mod+,")})`}
+        title={withKeys("Settings", "app.settings")}
         aria-label="Settings"
         aria-haspopup="dialog"
-        data-hint="mod+,"
+        data-hint={keyOf("app.settings")}
         data-hint-at="below"
         onClick={() => setSettingsOpen(settingsOpen() ? false : "general")}
       >

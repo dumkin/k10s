@@ -1,6 +1,7 @@
 import { Index, Show } from "solid-js";
-import { comboLabel } from "../lib/hotkeys";
-import { type ActionContext, actionLabel, type ResourceAction } from "../registry/actions";
+import { keyLabel } from "../lib/hotkeys";
+import { keyOf } from "../lib/keymap";
+import { type ActionContext, actionKeyId, actionLabel, type ResourceAction } from "../registry/actions";
 import { Icon } from "./Icon";
 
 /**
@@ -24,7 +25,7 @@ export function ActionMenuItems(props: { actions: ResourceAction[]; ctx: ActionC
             classList={{ danger: !!a().danger, locked: !!a().disabled, rbac: a().lock === "rbac" }}
             aria-disabled={a().disabled ? "true" : undefined}
             title={a().disabled ? a().disabledReason : a().note}
-            data-key={a().disabled ? undefined : a().shortcut}
+            data-key={a().disabled ? undefined : keyOf(actionKeyId(a()))}
             onClick={() => {
               const action = a();
               if (action.disabled) return;
@@ -37,9 +38,7 @@ export function ActionMenuItems(props: { actions: ResourceAction[]; ctx: ActionC
             <Show when={a().disabled}>
               <span class="ro-tag">{a().lock === "rbac" ? "no access" : "read-only"}</span>
             </Show>
-            <Show when={a().shortcut && !a().disabled}>
-              <span class="kbd">{comboLabel(a().shortcut!)}</span>
-            </Show>
+            <Show when={a().disabled ? undefined : keyLabel(actionKeyId(a()))}>{(key) => <span class="kbd">{key()}</span>}</Show>
           </button>
         </>
       )}

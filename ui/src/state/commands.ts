@@ -12,6 +12,7 @@ export interface Command {
   /** Extra strings matched by the fuzzy search (short names, groups…). */
   keywords?: string[];
   hint?: string;
+  /** The key that runs it, shown next to it: a command of the keymap's, as it is now (`keyOf`). */
   shortcut?: string;
   color?: string;
   checked?: boolean;

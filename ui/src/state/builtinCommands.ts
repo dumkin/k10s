@@ -5,7 +5,8 @@ import { backend, errorMessage, isTauri } from "../lib/backend";
 import { zoneSummary } from "../lib/clusters";
 import { comboLabel, isMac } from "../lib/hotkeys";
 import { normalizeNamespace } from "../lib/k8s";
-import { type ActionContext, actionLabel, actionsFor } from "../registry/actions";
+import { keyOf } from "../lib/keymap";
+import { type ActionContext, actionKeyId, actionLabel, actionsFor } from "../registry/actions";
 import { CATALOG, catalogEntry, isCatalogued, isHiddenGroup, titleFor } from "../registry/catalog";
 import {
   clusterColor,
@@ -25,10 +26,8 @@ import {
 } from "./clusters";
 import { type Command, registerCommands } from "./commands";
 import {
-  BACK_COMBO,
   backTarget,
   currentResource,
-  FORWARD_COMBO,
   forwardTarget,
   goBack,
   goForward,
@@ -158,7 +157,7 @@ function actionCommands(): Command[] {
     section: what ? `Selection · ${what}` : "Selection",
     icon: a.icon,
     hint: a.disabled,
-    shortcut: a.shortcut,
+    shortcut: keyOf(actionKeyId(a)),
     priority: a.disabled ? 0 : 20,
     run: () => a.run(ctx),
   }));
@@ -213,24 +212,24 @@ function historyCommands(): Command[] {
   const out: Command[] = [];
   const back = backTarget();
   const fwd = forwardTarget();
-  if (back) out.push({ id: "nav:back", title: `Back to ${where(back)}`, section: "Navigation", icon: "clock", keywords: ["back", "previous", "history"], shortcut: BACK_COMBO, priority: 1, run: () => void goBack() });
-  if (fwd) out.push({ id: "nav:forward", title: `Forward to ${where(fwd)}`, section: "Navigation", icon: "chevron-right", keywords: ["forward", "next", "history"], shortcut: FORWARD_COMBO, run: () => void goForward() });
+  if (back) out.push({ id: "nav:back", title: `Back to ${where(back)}`, section: "Navigation", icon: "clock", keywords: ["back", "previous", "history"], shortcut: keyOf("nav.back"), priority: 1, run: () => void goBack() });
+  if (fwd) out.push({ id: "nav:forward", title: `Forward to ${where(fwd)}`, section: "Navigation", icon: "chevron-right", keywords: ["forward", "next", "history"], shortcut: keyOf("nav.forward"), run: () => void goForward() });
   return out;
 }
 
 function appCommands(): Command[] {
   return [
-    { id: "app:settings", title: "Settings", section: "App", icon: "settings", keywords: ["preferences", "options", "config"], shortcut: "mod+,", priority: 1, run: () => void setSettingsOpen("general") },
+    { id: "app:settings", title: "Settings", section: "App", icon: "settings", keywords: ["preferences", "options", "config"], shortcut: keyOf("app.settings"), priority: 1, run: () => void setSettingsOpen("general") },
     // Each section on its own, found by searching ("logs settings", "updates"); an empty palette lists only the above.
     ...SETTINGS_SECTIONS.filter((s) => s.id !== "general").map(
       (s): Command => ({ id: `app:settings-${s.id}`, title: `Settings: ${s.title}`, section: "Settings", icon: s.icon, keywords: ["preferences", "options", ...s.keywords], run: () => void setSettingsOpen(s.id) }),
     ),
-    { id: "app:shortcuts", title: "Keyboard shortcuts", section: "App", icon: "keyboard", keywords: ["help", "keys", "hotkeys", "cheatsheet", "k9s"], shortcut: "?", run: () => void setHelpOpen(true) },
+    { id: "app:shortcuts", title: "Keyboard shortcuts", section: "App", icon: "keyboard", keywords: ["help", "keys", "hotkeys", "cheatsheet", "k9s"], shortcut: keyOf("app.help"), run: () => void setHelpOpen(true) },
     { id: "app:theme", title: `Switch to ${themePref() === "dark" ? "light" : "dark"} theme`, section: "App", icon: themePref() === "dark" ? "sun" : "moon", run: () => void setThemePref(themePref() === "dark" ? "light" : "dark") },
     // Zoom: the level now in the hint (the window opens at it next time).
-    { id: "app:zoom-in", title: "Zoom in", section: "App", icon: "plus", keywords: ["bigger", "larger", "font", "text size", "scale"], hint: `${Math.round(uiZoom() * 100)}%`, shortcut: "mod+=", run: () => zoomBy(1) },
-    { id: "app:zoom-out", title: "Zoom out", section: "App", icon: "minus", keywords: ["smaller", "font", "text size", "scale"], hint: `${Math.round(uiZoom() * 100)}%`, shortcut: "mod+-", run: () => zoomBy(-1) },
-    { id: "app:zoom-reset", title: "Actual size (100%)", section: "App", icon: "search", keywords: ["zoom", "reset", "font", "text size", "scale"], shortcut: "mod+0", run: () => void setUiZoom(1) },
+    { id: "app:zoom-in", title: "Zoom in", section: "App", icon: "plus", keywords: ["bigger", "larger", "font", "text size", "scale"], hint: `${Math.round(uiZoom() * 100)}%`, shortcut: keyOf("app.zoom-in"), run: () => zoomBy(1) },
+    { id: "app:zoom-out", title: "Zoom out", section: "App", icon: "minus", keywords: ["smaller", "font", "text size", "scale"], hint: `${Math.round(uiZoom() * 100)}%`, shortcut: keyOf("app.zoom-out"), run: () => zoomBy(-1) },
+    { id: "app:zoom-reset", title: "Actual size (100%)", section: "App", icon: "search", keywords: ["zoom", "reset", "font", "text size", "scale"], shortcut: keyOf("app.zoom-reset"), run: () => void setUiZoom(1) },
     {
       id: "app:readonly",
       // Turning it off asks again, natively (the engine owns the switch).

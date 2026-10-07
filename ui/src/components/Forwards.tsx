@@ -1,12 +1,12 @@
 import { For, Show } from "solid-js";
 import type { ForwardInfo, ForwardSpec } from "../lib/backend";
 import { bytes, plural } from "../lib/format";
-import { comboLabel } from "../lib/hotkeys";
 import { clusterColor, shortName } from "../state/clusters";
 import { forwards, forwardTarget, isPinned, openForward, startForward, startPinned, stopForward, stoppedPins, togglePin } from "../state/forwards";
 import { toast } from "../state/ui";
 import { registerDockPane } from "./Dock";
 import { Icon } from "./Icon";
+import { Kbd } from "./Kbd";
 
 /** The dock's port-forwards: running ones with their traffic, and pinned ones to start again. */
 export function ForwardsPane() {
@@ -36,7 +36,7 @@ function Hint() {
     <div class="dock-empty faint">
       <Icon name="link" size={20} />
       <span>
-        No port-forwards: <span class="kbd">{comboLabel("shift+f")}</span> on a pod, service or workload forwards one of its ports (pinned ones wait here to start again). <span class="kbd">S</span> opens a shell in a pod.
+        No port-forwards: <Kbd id="action.port-forward" /> on a pod, service or workload forwards one of its ports (pinned ones wait here to start again). <Kbd id="action.shell" /> opens a shell in a pod.
       </span>
     </div>
   );

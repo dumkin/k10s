@@ -14,6 +14,7 @@ import { forwardTarget, openInBrowser, pins, setOpenInBrowser, togglePin } from 
 import { ask, changeEngineSettings, dialog, engineSettings, now, readOnly, SETTINGS_SECTIONS, type SettingsSection, setHelpOpen, setReadOnly, setSettingsOpen, setThemePref, settingsOpen, setUiZoom, themePref, toast, uiZoom, ZOOM_STEPS, zoomBy } from "../state/ui";
 import { autoUpdate, checkForUpdates, checkingForUpdates, lastChecked, restartToUpdate, setAutomaticChecks, update, updatesEnabled } from "../state/updates";
 import { Icon, type IconName } from "./Icon";
+import { Kbd } from "./Kbd";
 import { Keys } from "./ShortcutsHelp";
 
 // The settings window (⌘,): a section at a time, picked on the left. Every change is in effect at once and saved to
@@ -370,7 +371,7 @@ function General() {
               setHelpOpen(true);
             }}
           >
-            Show all <span class="kbd">?</span>
+            Show all <Kbd id="app.help" />
           </button>
         </Row>
       </Group>

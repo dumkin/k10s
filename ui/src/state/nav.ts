@@ -3,7 +3,6 @@ import { ATTENTION } from "../lib/attention";
 import { PERMISSIONS } from "../lib/permissions";
 import type { ObjectRef, ResourceInfo } from "../lib/backend";
 import { naturalCompare } from "../lib/clusters";
-import { isMac } from "../lib/hotkeys";
 import { isValidNamespace, normalizeNamespace } from "../lib/k8s";
 import { arrayOf, isNumber, isString, persisted, recordOf } from "../lib/persist";
 import { globalMemo } from "../lib/reactive";
@@ -313,9 +312,6 @@ export interface NavState {
 }
 
 export const HISTORY_LIMIT = 50;
-/** ⌘[ / ⌘] on macOS, Alt+← / Alt+→ elsewhere (like browsers). */
-export const BACK_COMBO = isMac ? "mod+[" : "alt+arrowleft";
-export const FORWARD_COMBO = isMac ? "mod+]" : "alt+arrowright";
 const [backStack, setBackStack] = createSignal<NavState[]>([]);
 const [forwardStack, setForwardStack] = createSignal<NavState[]>([]);
 

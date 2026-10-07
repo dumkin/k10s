@@ -2,6 +2,8 @@ import { type Accessor, createMemo, createSignal, For, onMount, Show } from "sol
 import { Icon } from "../../components/Icon";
 import { Highlight } from "../../components/Popover";
 import { count } from "../../lib/format";
+import { keyed } from "../../lib/hotkeys";
+import { keyOf } from "../../lib/keymap";
 import { applyAt, type Spot, spotAt } from "../../lib/logs/complete";
 import { describeQuery, type Query } from "../../lib/logs/query";
 import { indexAtPos } from "../logBuffer";
@@ -215,7 +217,7 @@ export function QueryField(props: {
   };
 
   return (
-    <div class="lq" classList={{ invalid: !!props.query().error, focused: focused(), finding: !filterMode() }} data-hint="/" data-hint-ctx="details" title={sg() ? undefined : props.query().terms.length || props.query().error ? describeQuery(props.query()) : HELP}>
+    <div class="lq" classList={{ invalid: !!props.query().error, focused: focused(), finding: !filterMode() }} data-hint={keyOf("logs.find")} data-hint-ctx="details" title={sg() ? undefined : props.query().terms.length || props.query().error ? describeQuery(props.query()) : HELP}>
       <Icon name={filterMode() ? "filter" : "search"} size={12} />
       <div class="lq-box" ref={box}>
         <div class="lq-overlay" ref={overlay} aria-hidden="true">
@@ -291,10 +293,10 @@ export function QueryField(props: {
         <span class="lq-count" classList={{ none: position()!.total === 0 }}>
           {position()!.total === 0 ? "no matches" : position()!.at >= 0 ? `${count(position()!.at + 1)} of ${count(position()!.total)}` : `${count(position()!.total)} found`}
         </span>
-        <button class="lq-opt" title="Previous match (⇧Enter, ⇧N)" onClick={() => props.jump(-1)}>
+        <button class="lq-opt" title={`Previous match (⇧Enter${keyed("logs.previous-match", (k) => `, ${k}`)})`} onClick={() => props.jump(-1)}>
           <Icon name="chevron-up" size={11} />
         </button>
-        <button class="lq-opt" title="Next match (Enter, N)" onClick={() => props.jump(1)}>
+        <button class="lq-opt" title={`Next match (Enter${keyed("logs.next-match", (k) => `, ${k}`)})`} onClick={() => props.jump(1)}>
           <Icon name="chevron-down" size={11} />
         </button>
       </Show>
@@ -304,7 +306,16 @@ export function QueryField(props: {
       <button class="lq-opt" classList={{ on: regexMode() }} title="The whole query is one regular expression (⌥R); !… leaves its matches out" onClick={() => setRegexMode(!regexMode())}>
         .*
       </button>
-      <button class="lq-opt" classList={{ on: filterMode() }} title={filterMode() ? "Filtering: only matching lines are shown. Click to find instead — all lines stay, matches are highlighted (⌥F)" : "Finding: matches are highlighted, N goes to the next. Click to show only matching lines (⌥F)"} onClick={() => setFilterMode(!filterMode())}>
+      <button
+        class="lq-opt"
+        classList={{ on: filterMode() }}
+        title={
+          filterMode()
+            ? "Filtering: only matching lines are shown. Click to find instead — all lines stay, matches are highlighted (⌥F)"
+            : `Finding: matches are highlighted${keyed("logs.next-match", (k) => `, ${k} goes to the next`)}. Click to show only matching lines (⌥F)`
+        }
+        onClick={() => setFilterMode(!filterMode())}
+      >
         <Icon name="filter" size={11} />
       </button>
     </div>

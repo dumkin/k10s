@@ -192,6 +192,107 @@ describe("terminals", () => {
   });
 });
 
+/**
+ * Fresh hotkeys, as on macOS or elsewhere, whose keymap starts from a settings file holding `settings`; `edit` changes
+ * the file "outside the app".
+ */
+async function withSettings(settings: Record<string, unknown>, platform: "MacIntel" | "Linux x86_64" = "Linux x86_64") {
+  vi.resetModules();
+  vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+  const persist = await import("./persist");
+  persist.useFiles({ settings, state: {}, settingsError: null, settingsPath: null, statePath: null }, async () => {}, async () => {});
+  const hotkeys: Hotkeys = await import("./hotkeys");
+  return { ...hotkeys, edit: (keys: unknown) => persist.settingsEdited({ keys }, null) };
+}
+
+describe("commands of the keymap", () => {
+  const press = (init: KeyboardEventInit, target: EventTarget = document.body) => {
+    const e = key(init);
+    target.dispatchEvent(e);
+    return e;
+  };
+
+  it("fire on the keys the settings give them, and follow an edit of the file at once", async () => {
+    const { bindAll, installHotkeys, edit } = await withSettings({ keys: { logs: { wrap: "alt+w" } } });
+    installHotkeys();
+    const fired: string[] = [];
+    const off = bindAll([
+      { id: "logs.wrap", run: () => void fired.push("wrap") },
+      { id: "logs.pause", run: () => void fired.push("pause") },
+    ]);
+    expect(press({ key: "w", code: "KeyW" }).defaultPrevented).toBe(false);
+    press({ key: "w", code: "KeyW", altKey: true });
+    press({ key: "s", code: "KeyS" });
+    expect(fired).toEqual(["wrap", "pause"]);
+    // Bound as they were: the new keys work, the old ones don't.
+    edit({ logs: { wrap: ["w", "ctrl+shift+w"], pause: null } });
+    press({ key: "w", code: "KeyW" });
+    press({ key: "W", code: "KeyW", ctrlKey: true, shiftKey: true });
+    expect(press({ key: "s", code: "KeyS" }).defaultPrevented).toBe(false);
+    press({ key: "w", code: "KeyW", altKey: true });
+    expect(fired).toEqual(["wrap", "pause", "wrap", "wrap"]);
+    // Out of the file: their own keys again.
+    edit({});
+    press({ key: "s", code: "KeyS" });
+    expect(fired).toEqual(["wrap", "pause", "wrap", "wrap", "pause"]);
+    off();
+  });
+
+  it("try a command's bindings with the others of its key, by priority, as keys", async () => {
+    const { bindAll, installHotkeys, edit } = await withSettings({});
+    installHotkeys();
+    const fired: string[] = [];
+    const off = bindAll([
+      { combo: "g", run: () => void fired.push("combo g") },
+      { id: "table.first", priority: 10, run: () => (fired.push("first"), false) },
+    ]);
+    press({ key: "g", code: "KeyG" });
+    expect(fired).toEqual(["first", "combo g"]);
+    // Ctrl+D and mod+D are one key off macOS: the binding is tried once.
+    edit({ table: { first: ["ctrl+d", "mod+d"] } });
+    press({ key: "d", code: "KeyD", ctrlKey: true });
+    expect(fired).toEqual(["first", "combo g", "first"]);
+    off();
+  });
+
+  it("leave the keys that type to a field, even for commands that work in fields", async () => {
+    const { bindAll, installHotkeys, edit } = await withSettings({ keys: { app: { palette: ["p", "mod+k"] } } });
+    installHotkeys();
+    const fired: string[] = [];
+    const off = bindAll([
+      { id: "app.palette", inInputs: true, run: () => void fired.push("palette") },
+      // A key of its own still goes where it is bound to (a dialog's Space).
+      { combo: "space", inInputs: true, run: () => void fired.push("space") },
+    ]);
+    const input = document.body.appendChild(document.createElement("input"));
+    expect(press({ key: "p", code: "KeyP" }, input).defaultPrevented).toBe(false);
+    press({ key: "k", code: "KeyK", ctrlKey: true }, input);
+    press({ key: " ", code: "Space" }, input);
+    press({ key: "p", code: "KeyP" });
+    expect(fired).toEqual(["palette", "space", "palette"]);
+    edit({ app: { palette: "shift+space" } });
+    press({ key: " ", code: "Space", shiftKey: true }, input);
+    press({ key: " ", code: "Space", shiftKey: true });
+    expect(fired).toEqual(["palette", "space", "palette", "palette"]);
+    input.remove();
+    off();
+  });
+});
+
+describe("labels of commands' keys", () => {
+  it("say the key the settings give a command, or nothing", async () => {
+    const { keyLabel, withKeys, keyed } = await withSettings({ keys: { logs: { wrap: "alt+w", pause: null } } }, "MacIntel");
+    expect([keyLabel("logs.wrap"), keyLabel("logs.pause"), keyLabel("app.zoom-in"), keyLabel("nope")]).toEqual(["⌥W", undefined, "⌘=", undefined]);
+    expect([withKeys("Wrap lines", "logs.wrap"), withKeys("Pause", "logs.pause"), withKeys("Previous match", "yaml.previous-match", "shift+enter"), withKeys("Pause", "logs.pause", "escape")]).toEqual([
+      "Wrap lines (⌥W)",
+      "Pause",
+      "Previous match (⇧N, ⇧↵)",
+      "Pause (Esc)",
+    ]);
+    expect([`Wrap${keyed("logs.wrap", (k) => `: ${k}`)}`, `Pause${keyed("logs.pause", (k) => `: ${k}`)}`]).toEqual(["Wrap: ⌥W", "Pause"]);
+  });
+});
+
 describe("comboLabel", () => {
   it("labels combos for the platform", async () => {
     const mac = await load("MacIntel");

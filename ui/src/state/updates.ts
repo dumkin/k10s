@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { backend, errorMessage, type UpdateInfo } from "../lib/backend";
-import { comboLabel } from "../lib/hotkeys";
+import { keyLabel } from "../lib/hotkeys";
 import { isBoolean, isNumber, isObject, isString, load, save, setting } from "../lib/persist";
 import { type Command, registerCommands } from "./commands";
 import { ask, busyToast, toast } from "./ui";
@@ -16,6 +16,9 @@ export const update = found;
 const [enabled, setEnabled] = createSignal(false);
 export const updatesEnabled = enabled;
 let current = "";
+
+/** How a toast names the way to the palette's commands: its key, if it has one (`start`: at the start of a sentence). */
+const palette = (start = false) => keyLabel("app.palette") ?? `${start ? "The" : "the"} command palette`;
 
 /** After start, once the clusters had their turn; then again every six hours. */
 const FIRST_CHECK_MS = 15_000;
@@ -79,7 +82,7 @@ export async function checkForUpdates(manual = false): Promise<void> {
     }
     if (manual || announced !== next.version) {
       announced = next.version;
-      toast("info", `k10s ${next.version} is ready`, `Restart to update: click it in the status bar, or ${comboLabel("mod+k")} → Restart to update.`, { ttl: 10_000 });
+      toast("info", `k10s ${next.version} is ready`, `Restart to update: click it in the status bar, or ${palette()} → Restart to update.`, { ttl: 10_000 });
     }
   } catch (e) {
     if (manual) toast("error", "Could not check for updates", errorMessage(e));
@@ -145,7 +148,7 @@ function updateCommands(): Command[] {
       run: () => {
         const on = !autoUpdate();
         setAutomaticChecks(on);
-        toast("info", on ? "Automatic update checks are on" : "Automatic update checks are off", on ? undefined : `${comboLabel("mod+k")} → Check for updates still works.`);
+        toast("info", on ? "Automatic update checks are on" : "Automatic update checks are off", on ? undefined : `${palette(true)} → Check for updates still works.`);
       },
     },
   ];

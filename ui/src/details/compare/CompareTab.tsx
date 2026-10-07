@@ -1,10 +1,11 @@
 import { createMemo, createSignal, For, type JSX, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { Icon } from "../../components/Icon";
+import { Kbd } from "../../components/Kbd";
 import { Popover } from "../../components/Popover";
 import { type Change, changes, type CompareOptions, deepEqual, type Hide, isSecret, pairDiff, type Path, pathText, secretText, strip, yamlLines } from "../../lib/compare/diff";
 import { ADD, DEL, editScript } from "../../lib/compare/myers";
 import { isBlock, isMap, isNested, type Json } from "../../lib/compare/yaml";
-import { comboLabel } from "../../lib/hotkeys";
+import { comboLabel, keyed } from "../../lib/hotkeys";
 import { isError } from "../../lib/k8s";
 import type { DetailProps } from "../../registry/details";
 import { clusterColor, contexts, discoveredResources, selectedClusters, shortName } from "../../state/clusters";
@@ -375,7 +376,7 @@ export function CompareTab(props: DetailProps) {
               <button
                 class="chip-open"
                 onClick={() => revealObject({ ...p, namespace: p.namespace ?? undefined })}
-                title={`${fullName(p)} — ${marked ? `marked with ${props.row.n} when = was pressed` : "pinned (+): every object is compared with it"}. Click to go to it.`}
+                title={`${fullName(p)} — ${marked ? `marked with ${props.row.n}${keyed("tab.compare", (k) => ` when ${k} was pressed`)}` : `pinned${keyed("action.compare-pin", (k) => ` (${k})`)}: every object is compared with it`}. Click to go to it.`}
               >
                 <Icon name={marked ? "compare" : "pin"} size={11} />
                 <span class="swatch" style={{ background: clusterColor(p.cluster) }} />
@@ -461,7 +462,7 @@ export function CompareTab(props: DetailProps) {
               </p>
             </Show>
             <p>
-              Mark rows with <span class="kbd">{comboLabel("space")}</span> and press <span class="kbd">=</span> to compare them. Or pin an object with <span class="kbd">+</span> — of any cluster,
+              Mark rows with <span class="kbd">{comboLabel("space")}</span> and press <Kbd id="tab.compare" /> to compare them. Or pin an object with <Kbd id="action.compare-pin" /> — of any cluster,
               namespace or kind: Compare on any other object compares it with that one.
             </p>
             <button class="btn sm" onClick={(e) => setPickAt(e.currentTarget)}>

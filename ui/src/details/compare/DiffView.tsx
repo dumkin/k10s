@@ -1,7 +1,8 @@
 import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../../components/Icon";
 import { type Half, type PairDiff, type Path, pathKey } from "../../lib/compare/diff";
-import { bindAll } from "../../lib/hotkeys";
+import { bindAll, withKeys } from "../../lib/hotkeys";
+import { keyOf } from "../../lib/keymap";
 import { tokenizeLine } from "../../lib/yaml";
 import { detailsHaveKeyboard } from "../../state/keyboard";
 import { LINE_H } from "../CodeView";
@@ -208,8 +209,8 @@ export function DiffView(props: DiffViewProps) {
     onCleanup(() => ro.disconnect());
     onCleanup(
       bindAll([
-        { combo: "n", when: detailsHaveKeyboard, run: () => go(1) },
-        { combo: "shift+n", when: detailsHaveKeyboard, run: () => go(-1) },
+        { id: "diff.next-change", when: detailsHaveKeyboard, run: () => go(1) },
+        { id: "diff.previous-change", when: detailsHaveKeyboard, run: () => go(-1) },
       ]),
     );
   });
@@ -244,10 +245,10 @@ export function DiffView(props: DiffViewProps) {
             {current() >= 0 ? `${current() + 1}/` : ""}
             {starts().length} change{starts().length === 1 ? "" : "s"}
           </span>
-          <button class="btn sm ghost icon" onClick={() => go(-1)} title="Previous change (⇧N)" data-hint="shift+n" data-hint-ctx="details" data-hint-at="below">
+          <button class="btn sm ghost icon" onClick={() => go(-1)} title={withKeys("Previous change", "diff.previous-change")} data-hint={keyOf("diff.previous-change")} data-hint-ctx="details" data-hint-at="below">
             <Icon name="chevron-up" size={13} />
           </button>
-          <button class="btn sm ghost icon" onClick={() => go(1)} title="Next change (N)" data-hint="n" data-hint-ctx="details" data-hint-at="below">
+          <button class="btn sm ghost icon" onClick={() => go(1)} title={withKeys("Next change", "diff.next-change")} data-hint={keyOf("diff.next-change")} data-hint-ctx="details" data-hint-at="below">
             <Icon name="chevron-down" size={13} />
           </button>
         </Show>

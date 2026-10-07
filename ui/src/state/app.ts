@@ -94,21 +94,20 @@ export function initApp(): () => void {
       ),
     );
     bindAll([
-      { combo: "mod+k", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPaletteOpen(paletteOpen() ? false : { query: "" }) },
-      { combo: "mod+p", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPaletteOpen({ query: "" }) },
-      { combo: ":", priority: 50, when: () => free() && !paletteOpen(), run: () => void setPaletteOpen({ query: ":" }) },
-      { combo: "mod+shift+c", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPickerOpen("clusters") },
-      { combo: "mod+shift+n", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPickerOpen("namespaces") },
-      { combo: "?", priority: 50, when: () => free() && !paletteOpen() && !pickerOpen() && !settingsOpen(), run: () => void setHelpOpen(!helpOpen()) },
-      { combo: "mod+,", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setSettingsOpen(settingsOpen() ? false : "general") },
+      { id: "app.palette", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPaletteOpen(paletteOpen() ? false : { query: "" }) },
+      { id: "app.palette-new", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPaletteOpen({ query: "" }) },
+      { id: "app.command", priority: 50, when: () => free() && !paletteOpen(), run: () => void setPaletteOpen({ query: ":" }) },
+      { id: "app.clusters", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPickerOpen("clusters") },
+      { id: "app.namespaces", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setPickerOpen("namespaces") },
+      { id: "app.help", priority: 50, when: () => free() && !paletteOpen() && !pickerOpen() && !settingsOpen(), run: () => void setHelpOpen(!helpOpen()) },
+      { id: "app.settings", inInputs: true, inTerminal: isMac, priority: 50, when: free, run: () => void setSettingsOpen(settingsOpen() ? false : "general") },
       // Zoom, as in a browser: ⌘+ (⌘= without Shift) / ⌘− / ⌘0.
-      { combo: "mod+=", inInputs: true, inTerminal: isMac, priority: 50, run: () => zoomBy(1) },
-      { combo: "mod++", inInputs: true, inTerminal: isMac, priority: 50, run: () => zoomBy(1) },
-      { combo: "mod+-", inInputs: true, inTerminal: isMac, priority: 50, run: () => zoomBy(-1) },
-      { combo: "mod+0", inInputs: true, inTerminal: isMac, priority: 50, run: () => void setUiZoom(1) },
+      { id: "app.zoom-in", inInputs: true, inTerminal: isMac, priority: 50, run: () => zoomBy(1) },
+      { id: "app.zoom-out", inInputs: true, inTerminal: isMac, priority: 50, run: () => zoomBy(-1) },
+      { id: "app.zoom-reset", inInputs: true, inTerminal: isMac, priority: 50, run: () => void setUiZoom(1) },
       // The areas of the window, one after another (not from a terminal: F-keys are its programs').
-      { combo: "f6", inInputs: true, priority: 50, when: () => !modalOpen(), run: () => cycleRegion(1) },
-      { combo: "shift+f6", inInputs: true, priority: 50, when: () => !modalOpen(), run: () => cycleRegion(-1) },
+      { id: "app.next-area", inInputs: true, priority: 50, when: () => !modalOpen(), run: () => cycleRegion(1) },
+      { id: "app.previous-area", inInputs: true, priority: 50, when: () => !modalOpen(), run: () => cycleRegion(-1) },
     ]);
 
     return dispose;

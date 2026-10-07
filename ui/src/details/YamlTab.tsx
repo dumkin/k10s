@@ -1,7 +1,8 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../components/Icon";
 import { backend, errorMessage } from "../lib/backend";
-import { bindAll } from "../lib/hotkeys";
+import { bindAll, withKeys } from "../lib/hotkeys";
+import { keyOf } from "../lib/keymap";
 import { blockMask, type Token, tokenizeLine } from "../lib/yaml";
 import { type DetailProps, deferReady } from "../registry/details";
 import { detailsHaveKeyboard } from "../state/keyboard";
@@ -83,10 +84,9 @@ export function YamlTab(props: DetailProps) {
     onCleanup(
       bindAll(
         [
-          { combo: "/", run: focusFind },
-          { combo: "mod+f", inInputs: true, run: focusFind },
-          { combo: "n", run: go(1) },
-          { combo: "shift+n", run: go(-1) },
+          { id: "yaml.find", inInputs: true, run: focusFind },
+          { id: "yaml.next-match", run: go(1) },
+          { id: "yaml.previous-match", run: go(-1) },
         ].map((b) => ({ ...b, when: detailsHaveKeyboard })),
       ),
     );
@@ -114,7 +114,7 @@ export function YamlTab(props: DetailProps) {
   return (
     <>
       <div class="toolbar">
-        <div class="search-field" style={{ width: "220px" }} data-hint="/" data-hint-ctx="details">
+        <div class="search-field" style={{ width: "220px" }} data-hint={keyOf("yaml.find")} data-hint-ctx="details">
           <Icon name="search" size={13} />
           <input
             ref={findEl}
@@ -133,10 +133,17 @@ export function YamlTab(props: DetailProps) {
           <span class="faint" style={{ "font-size": "var(--fs-xs)", "min-width": "44px" }}>
             {matches().length ? `${Math.min(current() + 1, matches().length)}/${matches().length}` : "0/0"}
           </span>
-          <button class="btn sm ghost icon" onClick={() => step(-1)} title="Previous match (⇧N, ⇧↵)" data-hint="shift+n" data-hint-ctx="details" data-hint-at="below">
+          <button
+            class="btn sm ghost icon"
+            onClick={() => step(-1)}
+            title={withKeys("Previous match", "yaml.previous-match", "shift+enter")}
+            data-hint={keyOf("yaml.previous-match")}
+            data-hint-ctx="details"
+            data-hint-at="below"
+          >
             <Icon name="chevron-up" size={13} />
           </button>
-          <button class="btn sm ghost icon" onClick={() => step(1)} title="Next match (N, ↵)" data-hint="n" data-hint-ctx="details" data-hint-at="below">
+          <button class="btn sm ghost icon" onClick={() => step(1)} title={withKeys("Next match", "yaml.next-match", "enter")} data-hint={keyOf("yaml.next-match")} data-hint-ctx="details" data-hint-at="below">
             <Icon name="chevron-down" size={13} />
           </button>
         </Show>

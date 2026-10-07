@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from
 import { Icon } from "../components/Icon";
 import { errorMessage, Tone } from "../lib/backend";
 import { age, bytes, cpu as fmtCpu, parseTime } from "../lib/format";
+import { keyed } from "../lib/hotkeys";
 import { type DetailProps, deferReady } from "../registry/details";
 import { discoveredResources } from "../state/clusters";
 import { openInBrowser, startForward } from "../state/forwards";
@@ -156,7 +157,7 @@ function PortLink(props: { label: string; forward?: () => void }) {
     <span class="port">
       <span class="mono">{props.label}</span>
       <Show when={props.forward}>
-        <button class="port-fwd" title="Forward a local port to it (⇧F: choose the local port)" onClick={() => props.forward!()}>
+        <button class="port-fwd" title={`Forward a local port to it${keyed("action.port-forward", (k) => ` (${k}: choose the local port)`)}`} onClick={() => props.forward!()}>
           <Icon name="link" size={11} />
         </button>
       </Show>

@@ -3,6 +3,7 @@ import { Icon, type IconName } from "../components/Icon";
 import { backend, type GraphMessage, type GraphNode, type GraphRel, Tone } from "../lib/backend";
 import { age } from "../lib/format";
 import { HELM_RELEASES } from "../lib/helm";
+import { keyed } from "../lib/hotkeys";
 import { oneOf, persisted } from "../lib/persist";
 import { catalogEntry } from "../registry/catalog";
 import type { DetailProps } from "../registry/details";
@@ -495,7 +496,7 @@ function Inspector(props: { card: Card; layout: ReturnType<typeof layout>; graph
         </Show>
         <span class="grow" />
         <Show when={c().node?.resource && !c().node?.missing}>
-          <button class="btn sm" onClick={() => open(c().node!, props.cluster)} title="Open it here, with its relations (↵); ⌘[ comes back">
+          <button class="btn sm" onClick={() => open(c().node!, props.cluster)} title={`Open it here, with its relations (↵)${keyed("nav.back", (k) => `; ${k} comes back`)}`}>
             Open <span class="kbd">↵</span>
           </button>
         </Show>

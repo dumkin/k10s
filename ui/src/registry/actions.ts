@@ -1,6 +1,7 @@
 import type { IconName } from "../components/Icon";
-import { type AccessCheck, type AccessDecision, backend, errorMessage, type ResourceInfo, toError } from "../lib/backend";
+import { type AccessCheck, type AccessDecision, backend, errorMessage, type ResourceInfo, Tone, toError } from "../lib/backend";
 import { HELM_RELEASES } from "../lib/helm";
+import { registerKeyCommand } from "../lib/keymap";
 import { accessKnown, accessNow, accessOf, checkKey, checkText, streamVerb } from "../state/access";
 import { clusterColor, clusterStatus, shortName } from "../state/clusters";
 import { COMPARE_TAB, compareRows, isPinned, rowRef, togglePins } from "../state/compare";
@@ -10,6 +11,7 @@ import { objectRef, openDetails, resourceTitle, unmark } from "../state/nav";
 import { ask, busyToast, noteReadOnlyRefusal, readOnly, toast } from "../state/ui";
 import type { UIRow } from "../state/view";
 import { mainView } from "../state/views";
+import { tabKeyId } from "./details";
 
 /**
  * Actions on selected objects — shown in the details header, context menu and command palette.
@@ -31,7 +33,13 @@ export interface ResourceAction {
   id: string;
   title: string | ((ctx: ActionContext) => string);
   icon: IconName;
-  shortcut?: string;
+  /** Its keys, unless the settings give it others: bind and show them by its command, `actionKeyId(action)`. */
+  shortcut?: string | readonly string[];
+  /**
+   * The details tab it opens, which lends it its key (it has none of its own): that key opens the tab — and on several
+   * marked rows, where a tab can't, runs the action (their logs together, a comparison).
+   */
+  tab?: string;
   danger?: boolean;
   /** Works on several rows at once. */
   multi?: boolean;
@@ -72,7 +80,33 @@ export function registerAction(action: ResourceAction) {
   const i = actions.findIndex((a) => a.id === action.id);
   if (i >= 0) actions[i] = action;
   else actions.push(action);
+  const keys = action.shortcut;
+  if (!action.tab)
+    registerKeyCommand({
+      id: actionKeyId(action),
+      scope: "table",
+      get title() {
+        return keyTitle(action);
+      },
+      defaults: keys === undefined ? [] : typeof keys === "string" ? [keys] : keys,
+    });
 }
+
+/** The keymap's command whose keys run an action: `action.delete` (settings.json: `keys.action.delete`), or its tab's. */
+export const actionKeyId = (a: Pick<ResourceAction, "id" | "tab">) => (a.tab ? tabKeyId({ id: a.tab }) : `action.${a.id}`);
+
+/** What an action is called on one object, for the list of keys: "Delete", "Cordon". */
+function keyTitle(a: ResourceAction): string {
+  const row: UIRow = { key: "", cl: "", u: "", n: "", rv: "", t: 0, s: Tone.Neutral, c: [] };
+  try {
+    return actionTitle(a, { resourceKey: "", rows: [row] }).replace(/…$/, "");
+  } catch {
+    return a.id;
+  }
+}
+
+/** Every action, whatever it applies to, in the order `actionsFor` lists them. */
+export const allActions = (): readonly ResourceAction[] => actions;
 
 export function actionsFor(ctx: ActionContext): ResourceAction[] {
   if (!ctx.rows.length) return [];
@@ -432,7 +466,7 @@ registerAction({
   id: "logs",
   title: (ctx) => (ctx.rows.length > 1 ? "Logs, together (in the dock)" : "Logs"),
   icon: "logs",
-  shortcut: "l",
+  tab: "logs",
   primary: true,
   multi: true,
   // A workload's logs are its pods': any of them in its namespace.
@@ -682,7 +716,7 @@ registerAction({
   id: "yaml",
   title: "YAML",
   icon: "code",
-  shortcut: "y",
+  tab: "yaml",
   applies: (ctx) => ctx.resourceKey !== HELM_RELEASES,
   run: (ctx) => openDetails(ctx.rows[0].key, "yaml"),
 });
@@ -691,7 +725,7 @@ registerAction({
   id: "events",
   title: "Events",
   icon: "event",
-  shortcut: "e",
+  tab: "events",
   applies: (ctx) => !is(ctx, "events", "events.events.k8s.io", HELM_RELEASES),
   run: (ctx) => openDetails(ctx.rows[0].key, "events"),
 });
@@ -704,7 +738,7 @@ registerAction({
   id: "compare",
   title: (ctx) => (ctx.rows.length > 1 ? `Compare ${ctx.rows.length}` : "Compare"),
   icon: "compare",
-  shortcut: "=",
+  tab: COMPARE_TAB,
   multi: true,
   applies: comparable,
   run: (ctx) => (ctx.rows.length > 1 ? compareRows(ctx.rows, ctx.resourceKey) : openDetails(ctx.rows[0].key, COMPARE_TAB)),
@@ -994,7 +1028,7 @@ registerChange({
   id: "delete",
   title: (ctx) => (ctx.rows.length > 1 ? `Delete ${ctx.rows.length}…` : "Delete…"),
   icon: "trash",
-  shortcut: "ctrl+d",
+  shortcut: ["ctrl+d", "mod+backspace"],
   danger: true,
   multi: true,
   needs: own("delete"),

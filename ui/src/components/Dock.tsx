@@ -1,11 +1,12 @@
 import { createEffect, createSignal, For, type JSX, lazy, Match, on, onCleanup, onMount, Show, Suspense, Switch } from "solid-js";
-import { bindAll, comboLabel, isMac } from "../lib/hotkeys";
+import { bindAll, isMac, withKeys } from "../lib/hotkeys";
 import { splitterKeyDown } from "../lib/splitter";
 import { clusterColor, selectedClusters, shortName } from "../state/clusters";
 import { closeTerminal, DOCK_MIN, dockHeight, dockOpen, dockTab, setDockHeight, setDockOpen, setDockSpace, setDockTab, type TermTab, termCluster, termStatus, termTitle, termTabs } from "../state/dock";
 import { DockLogs } from "../details/logs/DockLogs";
 import { focusInDock } from "../state/keyboard";
 import { Icon } from "./Icon";
+import { Kbd } from "./Kbd";
 
 // xterm.js is most of a terminal's weight: loaded with the first one, not with the app.
 const TerminalView = lazy(() => import("./Terminal").then((m) => ({ default: m.TerminalView })));
@@ -16,8 +17,6 @@ function focusDock() {
   const target = pane?.querySelector<HTMLElement>(".term textarea, [tabindex], button, input") ?? pane;
   target?.focus();
 }
-
-export const DOCK_COMBO = "mod+j";
 
 /** Extra panes the dock shows next to its terminals (port-forwards), contributed by their features. */
 export interface DockPane {
@@ -102,8 +101,8 @@ export function Dock() {
     };
     onCleanup(
       bindAll([
-        { combo: DOCK_COMBO, inInputs: true, inTerminal: isMac, priority: 50, run: toggle },
-        { combo: "mod+shift+j", inInputs: true, inTerminal: true, priority: 50, run: toggle },
+        { id: "dock.toggle", inInputs: true, inTerminal: isMac, priority: 50, run: toggle },
+        { id: "dock.toggle-from-terminal", inInputs: true, inTerminal: true, priority: 50, run: toggle },
       ]),
     );
   });
@@ -145,7 +144,7 @@ export function Dock() {
         </For>
         <For each={termTabs()}>{(tab) => <TermTabButton tab={tab} />}</For>
         <span class="spacer" />
-        <button class="btn sm ghost icon" title={`Hide (${comboLabel(DOCK_COMBO)})`} aria-label="Hide the dock" onClick={() => setDockOpen(false)}>
+        <button class="btn sm ghost icon" title={withKeys("Hide", "dock.toggle")} aria-label="Hide the dock" onClick={() => setDockOpen(false)}>
           <Icon name="chevron-down" size={13} />
         </button>
       </div>
@@ -174,7 +173,7 @@ export function Dock() {
           <div class="dock-empty faint">
             <Icon name="terminal" size={20} />
             <span>
-              No terminals. <span class="kbd">S</span> opens a shell in the selected pod, <span class="kbd">A</span> attaches to it.
+              No terminals. <Kbd id="action.shell" /> opens a shell in the selected pod, <Kbd id="action.attach" /> attaches to it.
             </span>
           </div>
         </Show>

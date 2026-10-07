@@ -1,11 +1,12 @@
 import { type Accessor, createEffect, createMemo, createSignal, For, Index, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { age } from "../lib/format";
-import { type Binding, bindAll, comboLabel } from "../lib/hotkeys";
+import { type Binding, bindAll, keyLabel, withKeys } from "../lib/hotkeys";
+import { keyOf } from "../lib/keymap";
 import { splitterKeyDown } from "../lib/splitter";
-import { type ActionContext, actionLabel, actionsFor, actionTitle, type ResourceAction } from "../registry/actions";
+import { type ActionContext, actionKeyId, actionLabel, actionsFor, actionTitle, type ResourceAction } from "../registry/actions";
 import { catalogEntry } from "../registry/catalog";
-import { type DetailTab, DetailReadyContext, tabsFor } from "../registry/details";
+import { type DetailTab, DetailReadyContext, tabKeyId, tabsFor } from "../registry/details";
 import { clusterColor } from "../state/clusters";
 import { detailsHaveKeyboard, onControl } from "../state/keyboard";
 import { closeDetails, currentResource, detailsFull, detailsTab, marked, objectRef, resourceKey, selectedKey, setDetailsFull, setDetailsTab } from "../state/nav";
@@ -143,21 +144,21 @@ export function DetailsPanel() {
     const pageUp = scroll((el) => el.scrollTop - el.clientHeight * 0.9);
     const top = scroll(() => 0);
     const bottom = scroll((el) => el.scrollHeight);
-    const keys: [string, (e: KeyboardEvent) => boolean | void][] = [
-      ["j", down],
-      ["arrowdown", down],
-      ["k", up],
-      ["arrowup", up],
-      ["pagedown", pageDown],
-      ["space", pageDown],
-      ["pageup", pageUp],
-      ["shift+space", pageUp],
-      ["g", top],
-      ["home", top],
-      ["shift+g", bottom],
-      ["end", bottom],
+    const keys: Binding[] = [
+      { id: "details.down", run: down },
+      { combo: "arrowdown", run: down },
+      { id: "details.up", run: up },
+      { combo: "arrowup", run: up },
+      { combo: "pagedown", run: pageDown },
+      { combo: "space", run: pageDown },
+      { combo: "pageup", run: pageUp },
+      { combo: "shift+space", run: pageUp },
+      { id: "details.top", run: top },
+      { combo: "home", run: top },
+      { id: "details.bottom", run: bottom },
+      { combo: "end", run: bottom },
     ];
-    onCleanup(bindAll(keys.map(([combo, run]): Binding => ({ combo, run, when: detailsHaveKeyboard }))));
+    onCleanup(bindAll(keys.map((b) => ({ ...b, when: detailsHaveKeyboard }))));
   });
   // Leaving full view hands the keyboard back to the table (focus left inside would keep it here).
   createEffect(
@@ -261,10 +262,10 @@ export function DetailsPanel() {
               <button
                 class="btn ghost icon"
                 classList={{ on: detailsFull() }}
-                title={detailsFull() ? `Back to the table (${comboLabel("f")} or Esc)` : `Full view — more room for logs and YAML (${comboLabel("f")})`}
+                title={detailsFull() ? withKeys("Back to the table", "details.full", "escape") : withKeys("Full view — more room for logs and YAML", "details.full")}
                 aria-label={detailsFull() ? "Back to the table" : "Full view"}
                 aria-pressed={detailsFull()}
-                data-hint="f"
+                data-hint={keyOf("details.full")}
                 data-hint-at="below"
                 onClick={() => setDetailsFull(!detailsFull())}
               >
@@ -290,14 +291,16 @@ export function DetailsPanel() {
                     tabIndex={active()?.id === t.id ? 0 : -1}
                     classList={{ active: active()?.id === t.id }}
                     onClick={() => setDetailsTab(t.id)}
-                    title={t.shortcut ? `${t.title} (${comboLabel(t.shortcut)})` : t.title}
+                    title={withKeys(t.title, tabKeyId(t))}
                   >
                     <Icon name={t.icon} size={13} />
                     <span class="tab-title">{t.title}</span>
-                    <Show when={t.shortcut}>
-                      <span class="kbd" aria-hidden="true">
-                        {t.shortcut!.toUpperCase()}
-                      </span>
+                    <Show when={keyLabel(tabKeyId(t))}>
+                      {(key) => (
+                        <span class="kbd" aria-hidden="true">
+                          {key()}
+                        </span>
+                      )}
                     </Show>
                   </button>
                 )}
@@ -426,9 +429,9 @@ function ActionsBar(props: { actions: ResourceAction[]; ctx: ActionContext }) {
             tabIndex={i >= fit() ? -1 : undefined}
             style={a().danger ? { color: "var(--err)" } : undefined}
             // With rows marked, the shortcut acts on the marks, not on this object: don't hint it then.
-            title={a().disabled ? a().disabledReason : a().shortcut && !marked().size ? `${actionTitle(a(), props.ctx)} (${comboLabel(a().shortcut!)})` : actionTitle(a(), props.ctx)}
+            title={a().disabled ? a().disabledReason : marked().size ? actionTitle(a(), props.ctx) : withKeys(actionTitle(a(), props.ctx), actionKeyId(a()))}
             // The action keys work from the table (see `tableHasKeyboard`).
-            data-hint={a().shortcut && !marked().size && !a().disabled && i < fit() ? a().shortcut : undefined}
+            data-hint={!marked().size && !a().disabled && i < fit() ? keyOf(actionKeyId(a())) : undefined}
             data-hint-ctx="table"
             data-hint-at="below"
             onClick={() => !a().disabled && a().run(props.ctx)}

@@ -1,6 +1,7 @@
 import { type Component, createContext, onCleanup, useContext } from "solid-js";
 import type { IconName } from "../components/Icon";
 import type { ObjectRef, ResourceInfo } from "../lib/backend";
+import { registerKeyCommand } from "../lib/keymap";
 import type { UIRow } from "../state/view";
 
 /**
@@ -18,6 +19,7 @@ export interface DetailTab {
   id: string;
   title: string;
   icon: IconName;
+  /** Its key, unless the settings give it others: bind and show it by its command, `tabKeyId(tab)` (see `lib/keymap`). */
   shortcut?: string;
   order: number;
   when(resourceKey: string, resource?: ResourceInfo): boolean;
@@ -33,11 +35,18 @@ export function registerDetailTab(tab: DetailTab) {
   if (i >= 0) tabs[i] = tab;
   else tabs.push(tab);
   tabs.sort((a, b) => a.order - b.order);
+  registerKeyCommand({ id: tabKeyId(tab), scope: "details", title: `${tab.title} tab`, defaults: tab.shortcut ? [tab.shortcut] : [] });
 }
+
+/** The keymap's command that opens a tab: `tab.logs` (settings.json: `keys.tab.logs`). */
+export const tabKeyId = (tab: Pick<DetailTab, "id">) => `tab.${tab.id}`;
 
 export function tabsFor(resourceKey: string, resource?: ResourceInfo): DetailTab[] {
   return tabs.filter((t) => t.when(resourceKey, resource));
 }
+
+/** Every tab, whatever it is for. */
+export const allDetailTabs = (): readonly DetailTab[] => tabs;
 
 /**
  * A tab that shows nothing until it has loaded (the Overview waits for the object) can say when it is ready: the

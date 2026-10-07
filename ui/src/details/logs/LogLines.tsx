@@ -1,7 +1,10 @@
 import { createEffect, createMemo, createSignal, For, Index, type JSX, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import { Icon } from "../../components/Icon";
+import { Kbd } from "../../components/Kbd";
 import { Popover } from "../../components/Popover";
 import { count } from "../../lib/format";
+import { withKeys } from "../../lib/hotkeys";
+import { keyOf } from "../../lib/keymap";
 import { clockOf, dayOf, gapOf, stampOf } from "../../lib/logs/format";
 import type { Piece } from "../../lib/logs/highlight";
 import { type FieldValue, jsonOf, LEVEL_NAME, LEVEL_TAG, TRACE_KEYS } from "../../lib/logs/parse";
@@ -468,7 +471,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
           }}
         >
           {/* (Its chevron is drawn by CSS: an icon in every line drawn adds up in a busy log.) */}
-          <button class="ln-x" title={isOpen() ? "Collapse (X)" : "Expand: fields, time, source (X)"} onClick={() => c.toggleExpanded(l)} />
+          <button class="ln-x" title={withKeys(isOpen() ? "Collapse" : "Expand: fields, time, source", "logs.expand")} onClick={() => c.toggleExpanded(l)} />
           <Prefix l={l} />
           <Show when={pretty() && (columns().length > 0 || head().tag !== undefined || s() !== null)}>
             <span class={`tag lvl-${head().tag ?? 0}`}>{head().tag ? LEVEL_TAG[head().tag!] : ""}</span>
@@ -735,15 +738,15 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
         </Show>
       </div>
       <Show when={c.pausedAt() !== null}>
-        <button class="btn primary follow-btn" title="Resume (S): show the lines that came meanwhile" onClick={() => c.setPaused(false)}>
+        <button class="btn primary follow-btn" title={`${withKeys("Resume", "logs.pause")}: show the lines that came meanwhile`} onClick={() => c.setPaused(false)}>
           <Icon name="play" size={12} /> Resume · {count(Math.max(0, (c.version(), c.buffer().seq - 1 - c.pausedAt()!)))} new
         </button>
       </Show>
       <Show when={c.pausedAt() === null && !c.follow()}>
         <button
           class="btn primary follow-btn"
-          title="Follow new lines (⇧G)"
-          data-hint="shift+g"
+          title={withKeys("Follow new lines", "logs.last")}
+          data-hint={keyOf("logs.last")}
           data-hint-ctx="details"
           data-hint-at="left"
           onClick={() => c.followNew()}
@@ -785,23 +788,23 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
               <Show
                 when={inSpan(m.line) && c.spanLines().length > 1}
                 fallback={
-                  <button class="opt" role="menuitem" data-key="c" onClick={() => (setLineMenu(null), c.copyLines([m.line], "text"))}>
+                  <button class="opt" role="menuitem" data-key={keyOf("logs.copy")} onClick={() => (setLineMenu(null), c.copyLines([m.line], "text"))}>
                     <Icon name="copy" size={13} />
                     <span>Copy the line</span>
-                    <span class="kbd">C</span>
+                    <Kbd id="logs.copy" />
                   </button>
                 }
               >
-                <button class="opt" role="menuitem" data-key="c" onClick={() => (setLineMenu(null), c.copyLines(c.spanLines(), "text"))}>
+                <button class="opt" role="menuitem" data-key={keyOf("logs.copy")} onClick={() => (setLineMenu(null), c.copyLines(c.spanLines(), "text"))}>
                   <Icon name="copy" size={13} />
                   <span>Copy the {count(c.spanLines().length)} lines picked</span>
-                  <span class="kbd">C</span>
+                  <Kbd id="logs.copy" />
                 </button>
               </Show>
-              <button class="opt" role="menuitem" data-key="x" onClick={() => (setLineMenu(null), c.toggleExpanded(m.line))}>
+              <button class="opt" role="menuitem" data-key={keyOf("logs.expand")} onClick={() => (setLineMenu(null), c.toggleExpanded(m.line))}>
                 <Icon name="chevron-right" size={13} />
                 <span>{c.expanded().has(m.line) ? "Collapse" : "Expand"}</span>
-                <span class="kbd">X</span>
+                <Kbd id="logs.expand" />
               </button>
               <div class="menu-sep" />
               <button class="opt" role="menuitem" onClick={() => (setLineMenu(null), c.setOnly(new Set([c.patternOf(m.line)])))}>

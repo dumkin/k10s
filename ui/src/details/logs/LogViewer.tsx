@@ -9,7 +9,8 @@ import { asJsonl, asText, type ExportLine } from "../../lib/logs/format";
 import type { Level } from "../../lib/logs/parse";
 import { PatternIds } from "../../lib/logs/patterns";
 import { highlighter, parseQuery, withTerm } from "../../lib/logs/query";
-import { bindAll, comboLabel } from "../../lib/hotkeys";
+import { type Binding, bindAll, comboLabel, withKeys } from "../../lib/hotkeys";
+import { keyOf } from "../../lib/keymap";
 import { shortName } from "../../state/clusters";
 import { onControl } from "../../state/keyboard";
 import { toast } from "../../state/ui";
@@ -660,44 +661,43 @@ export function LogViewer(props: LogViewerProps) {
     if (!on) lines?.toBottom();
   };
   onMount(() => {
-    const keys: { combo: string; run: (e: KeyboardEvent) => boolean | void; inInputs?: boolean }[] = [
-      { combo: "/", run: focusQuery },
-      { combo: "mod+f", inInputs: true, run: focusQuery },
-      { combo: "w", run: () => setWrap(!wrap()) },
-      { combo: "t", run: () => setShowTs(!showTs()) },
-      { combo: "p", run: () => setPrevious(!previous()) },
-      { combo: "v", run: () => setPretty(!pretty()) },
-      { combo: "h", run: () => setHistogramOpen(!histogramOpen()) },
-      { combo: "s", run: () => setPaused(pausedAt() === null) },
-      { combo: "n", run: () => jump(1) },
-      { combo: "shift+n", run: () => jump(-1) },
-      { combo: "]", run: () => jump(1, true) },
-      { combo: "[", run: () => jump(-1, true) },
-      { combo: "x", run: () => (selected() ? toggleExpanded(selected()!) : false) },
+    const keys: Binding[] = [
+      { id: "logs.find", inInputs: true, run: focusQuery },
+      { id: "logs.wrap", run: () => setWrap(!wrap()) },
+      { id: "logs.timestamps", run: () => setShowTs(!showTs()) },
+      { id: "logs.previous-containers", run: () => setPrevious(!previous()) },
+      { id: "logs.pretty", run: () => setPretty(!pretty()) },
+      { id: "logs.histogram", run: () => setHistogramOpen(!histogramOpen()) },
+      { id: "logs.pause", run: () => setPaused(pausedAt() === null) },
+      { id: "logs.next-match", run: () => jump(1) },
+      { id: "logs.previous-match", run: () => jump(-1) },
+      { id: "logs.next-problem", run: () => jump(1, true) },
+      { id: "logs.previous-problem", run: () => jump(-1, true) },
+      { id: "logs.expand", run: () => (selected() ? toggleExpanded(selected()!) : false) },
       { combo: "enter", run: (e) => (selected() && !onControl(e) ? toggleExpanded(selected()!) : false) },
-      { combo: "c", run: copyPicked },
+      { id: "logs.copy", run: copyPicked },
       // ⌘C copies text selected with the mouse, else the lines picked.
       { combo: "mod+c", run: () => (window.getSelection()?.isCollapsed === false ? false : copyPicked()) },
-      { combo: "mod+s", inInputs: true, run: () => void save("text") },
+      { id: "logs.save", inInputs: true, run: () => void save("text") },
     ];
     // The cursor's keys (before the details' scrolling ones). Keys a focused control has a use for stay its own.
     const own = (run: () => void) => (e: KeyboardEvent) => (onControl(e) ? false : run());
-    const cursor: typeof keys = [
-      { combo: "j", run: () => move(1) },
+    const cursor: Binding[] = [
+      { id: "logs.down", run: () => move(1) },
       { combo: "arrowdown", run: own(() => move(1)) },
-      { combo: "k", run: () => move(-1) },
+      { id: "logs.up", run: () => move(-1) },
       { combo: "arrowup", run: own(() => move(-1)) },
-      { combo: "shift+j", run: () => move(1, true) },
+      { id: "logs.pick-down", run: () => move(1, true) },
       { combo: "shift+arrowdown", run: own(() => move(1, true)) },
-      { combo: "shift+k", run: () => move(-1, true) },
+      { id: "logs.pick-up", run: () => move(-1, true) },
       { combo: "shift+arrowup", run: own(() => move(-1, true)) },
       { combo: "pagedown", run: own(() => page(1)) },
       { combo: "space", run: own(() => page(1)) },
       { combo: "pageup", run: own(() => page(-1)) },
       { combo: "shift+space", run: own(() => page(-1)) },
-      { combo: "g", run: toFirst },
+      { id: "logs.first", run: toFirst },
       { combo: "home", run: own(toFirst) },
-      { combo: "shift+g", run: followNew },
+      { id: "logs.last", run: followNew },
       { combo: "end", run: own(followNew) },
       {
         combo: "escape",
@@ -823,19 +823,19 @@ export function LogViewer(props: LogViewerProps) {
   };
 
   const menuItems = createMemo((): (MenuItem | null)[] => [
-    { label: "Previous container", hint: "p", on: previous(), title: "Logs of the containers before their last restart (crashed ones)", run: () => setPrevious(!previous()) },
+    { label: "Previous container", hint: keyOf("logs.previous-containers"), on: previous(), title: "Logs of the containers before their last restart (crashed ones)", run: () => setPrevious(!previous()) },
     ...(props.menu?.() ?? []),
     null,
-    { label: "Timestamps", hint: "t", on: showTs(), run: () => setShowTs(!showTs()) },
-    { label: "Wrap lines", hint: "w", on: wrap(), run: () => setWrap(!wrap()) },
-    { label: "Pretty structured lines", hint: "v", on: pretty(), title: "JSON and logfmt lines as level, message and fields; plain lines coloured", run: () => setPretty(!pretty()) },
+    { label: "Timestamps", hint: keyOf("logs.timestamps"), on: showTs(), run: () => setShowTs(!showTs()) },
+    { label: "Wrap lines", hint: keyOf("logs.wrap"), on: wrap(), run: () => setWrap(!wrap()) },
+    { label: "Pretty structured lines", hint: keyOf("logs.pretty"), on: pretty(), title: "JSON and logfmt lines as level, message and fields; plain lines coloured", run: () => setPretty(!pretty()) },
     { label: "Fold long stack traces", on: fold(), run: () => setFold(!fold()) },
     { label: "Times in UTC", on: utc(), run: () => setUtc(!utc()) },
-    { label: "Histogram", hint: "h", on: histogramOpen(), run: () => setHistogramOpen(!histogramOpen()) },
+    { label: "Histogram", hint: keyOf("logs.histogram"), on: histogramOpen(), run: () => setHistogramOpen(!histogramOpen()) },
     null,
     { label: "Copy shown lines", icon: "copy", run: () => copyLines(shown(), "text") },
     { label: "Copy shown lines as JSON Lines", icon: "copy", run: () => copyLines(shown(), "jsonl") },
-    { label: "Save shown lines…", icon: "download", hint: "mod+s", run: () => void save("text") },
+    { label: "Save shown lines…", icon: "download", hint: keyOf("logs.save"), run: () => void save("text") },
     { label: "Save as JSON Lines…", icon: "download", run: () => void save("jsonl") },
     null,
     {
@@ -890,8 +890,8 @@ export function LogViewer(props: LogViewerProps) {
         <button
           class="btn sm ghost icon"
           classList={{ on: pausedAt() !== null }}
-          title={pausedAt() !== null ? "Resume (S): show the lines that came meanwhile" : "Pause (S): stop showing new lines (they are kept)"}
-          data-hint="s"
+          title={pausedAt() !== null ? `${withKeys("Resume", "logs.pause")}: show the lines that came meanwhile` : `${withKeys("Pause", "logs.pause")}: stop showing new lines (they are kept)`}
+          data-hint={keyOf("logs.pause")}
           data-hint-ctx="details"
           data-hint-at="below"
           onClick={() => setPaused(pausedAt() === null)}
@@ -921,13 +921,29 @@ export function LogViewer(props: LogViewerProps) {
           </button>
         </Show>
         <span class="sep opt-wide" />
-        <button class="btn sm ghost icon opt-wide" classList={{ on: showTs() }} onClick={() => setShowTs(!showTs())} title="Timestamps (T)" data-hint="t" data-hint-ctx="details" data-hint-at="below">
+        <button
+          class="btn sm ghost icon opt-wide"
+          classList={{ on: showTs() }}
+          onClick={() => setShowTs(!showTs())}
+          title={withKeys("Timestamps", "logs.timestamps")}
+          data-hint={keyOf("logs.timestamps")}
+          data-hint-ctx="details"
+          data-hint-at="below"
+        >
           <Icon name="clock" size={12} />
         </button>
-        <button class="btn sm ghost icon opt-wide" classList={{ on: wrap() }} onClick={() => setWrap(!wrap())} title="Wrap lines (W)" data-hint="w" data-hint-ctx="details" data-hint-at="below">
+        <button class="btn sm ghost icon opt-wide" classList={{ on: wrap() }} onClick={() => setWrap(!wrap())} title={withKeys("Wrap lines", "logs.wrap")} data-hint={keyOf("logs.wrap")} data-hint-ctx="details" data-hint-at="below">
           <Icon name="wrap" size={12} />
         </button>
-        <button class="btn sm ghost icon opt-wide" classList={{ on: pretty() }} onClick={() => setPretty(!pretty())} title="Pretty (V): JSON and logfmt lines as level, message and fields; plain lines coloured. Off: as written" data-hint="v" data-hint-ctx="details" data-hint-at="below">
+        <button
+          class="btn sm ghost icon opt-wide"
+          classList={{ on: pretty() }}
+          onClick={() => setPretty(!pretty())}
+          title={`${withKeys("Pretty", "logs.pretty")}: JSON and logfmt lines as level, message and fields; plain lines coloured. Off: as written`}
+          data-hint={keyOf("logs.pretty")}
+          data-hint-ctx="details"
+          data-hint-at="below"
+        >
           <Icon name="braces" size={12} />
         </button>
         <button class="btn sm ghost icon" classList={{ on: previous() }} title="More: previous container, display, copy, save" onClick={(e) => setMenuAt(e.currentTarget)}>

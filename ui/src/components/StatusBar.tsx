@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { backend, type HubStats, isTauri } from "../lib/backend";
-import { comboLabel } from "../lib/hotkeys";
+import { keyLabel, withKeys } from "../lib/hotkeys";
 import { clusterColor, clusterStatus, selectedClusters, shortName } from "../state/clusters";
 import { clearPins, pins } from "../state/compare";
 import { dockOpen, dockTab, setDockOpen, setDockTab, termTabs } from "../state/dock";
@@ -62,7 +62,7 @@ export function StatusBar(props: { version: string }) {
       <Show when={termTabs().length}>
         <button
           class="item"
-          title={`Terminals (${comboLabel("mod+j")})`}
+          title={withKeys("Terminals", "dock.toggle")}
           onClick={() => {
             const open = dockOpen() && dockTab() !== "forwards";
             if (!open) setDockTab(termTabs().at(-1)!.id);
@@ -136,9 +136,13 @@ export function StatusBar(props: { version: string }) {
           mock data
         </span>
       </Show>
-      <span class="item">
-        <span class="kbd">{comboLabel("mod+k")}</span>
-      </span>
+      <Show when={keyLabel("app.palette")}>
+        {(key) => (
+          <span class="item">
+            <span class="kbd">{key()}</span>
+          </span>
+        )}
+      </Show>
       <span class="item">v{props.version}</span>
     </footer>
   );

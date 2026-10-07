@@ -1,6 +1,6 @@
 import { createSignal, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import { comboLabel } from "../lib/hotkeys";
+import { comboLabel, keyLabel } from "../lib/hotkeys";
 import { hintsShown } from "../lib/keyhints";
 import { detailsHaveKeyboard, tableHasKeyboard } from "../state/keyboard";
 
@@ -106,9 +106,13 @@ function HintLayer() {
         {/* Out of the way of the badges, like the key line at the bottom of k9s. */}
         <div class="key-hints-dock">
           <For each={panels()}>{(panel) => panel()}</For>
-          <span class="khd-item">
-            <span class="kbd">?</span> all keyboard shortcuts
-          </span>
+          <Show when={keyLabel("app.help")}>
+            {(key) => (
+              <span class="khd-item">
+                <span class="kbd">{key()}</span> all keyboard shortcuts
+              </span>
+            )}
+          </Show>
         </div>
       </div>
     </Portal>

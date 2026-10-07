@@ -2,13 +2,15 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-j
 import { Portal } from "solid-js/web";
 import { bind, comboLabel } from "../lib/hotkeys";
 import { holdInert, restoreFocus } from "../lib/inert";
-import { BACK_COMBO, FORWARD_COMBO, namespaceKeys } from "../state/nav";
+import { keysOf } from "../lib/keymap";
+import { namespaceKeys } from "../state/nav";
 import { helpOpen, setHelpOpen } from "../state/ui";
 import { Icon } from "./Icon";
 
 /**
  * Keys as written in the sheet: combos separated by spaces (`mod+k`, `shift+g`), `|` between alternatives,
- * `…` for a range, `hold:mod` for a key that is held.
+ * `…` for a range, `hold:mod` for a key that is held — and `@logs.wrap` for the keys of a command, as the settings
+ * have them: all of them in a row about that one command, the first of each in a row of several.
  */
 interface ShortcutRow {
   keys: string;
@@ -24,29 +26,29 @@ export const SHORTCUTS: ShortcutGroup[] = [
   {
     title: "Anywhere",
     rows: [
-      { keys: "mod+k", text: "Command palette: resources, clusters, namespaces, actions" },
-      { keys: ":", text: "k9s command: :po, :deploy payments, :ns kube-system, :ctx prod" },
-      { keys: "mod+shift+c | mod+shift+n", text: "Clusters / namespaces" },
+      { keys: "@app.palette", text: "Command palette: resources, clusters, namespaces, actions" },
+      { keys: "@app.command", text: "k9s command: :po, :deploy payments, :ns kube-system, :ctx prod" },
+      { keys: "@app.clusters | @app.namespaces", text: "Clusters / namespaces" },
       { keys: "mod+1 … mod+9", text: "Resource of the sidebar, counted top to bottom" },
-      { keys: `${BACK_COMBO} | ${FORWARD_COMBO}`, text: "Back / forward" },
-      { keys: "f6 | shift+f6", text: "Next / previous area: sidebar, table, details, dock" },
-      { keys: "mod+= | mod+- | mod+0", text: "Zoom in / out / back to 100% (the app opens at it next time)" },
+      { keys: "@nav.back | @nav.forward", text: "Back / forward" },
+      { keys: "@app.next-area | @app.previous-area", text: "Next / previous area: sidebar, table, details, dock" },
+      { keys: "@app.zoom-in | @app.zoom-out | @app.zoom-reset", text: "Zoom in / out / back to 100% (the app opens at it next time)" },
       { keys: "hold:mod", text: "Show the keys of what is on screen" },
-      { keys: "?", text: "This sheet" },
-      { keys: "mod+,", text: "Settings" },
+      { keys: "@app.help", text: "This sheet" },
+      { keys: "@app.settings", text: "Settings" },
     ],
   },
   {
     title: "Table",
     rows: [
-      { keys: "j k | arrowdown arrowup", text: "Next / previous row" },
-      { keys: "g shift+g | pageup pagedown", text: "First / last row, page up / down" },
-      { keys: "/ | mod+f", text: "Filter: foo !bar app=web" },
+      { keys: "@table.down @table.up | arrowdown arrowup", text: "Next / previous row" },
+      { keys: "@table.first @table.last | pageup pagedown", text: "First / last row, page up / down" },
+      { keys: "@table.filter | @table.filter-anywhere", text: "Filter: foo !bar app=web" },
       { keys: "enter", text: "Details" },
       { keys: "space | mod+a", text: "Mark the row (and go down) / mark all shown" },
-      { keys: "shift+j shift+k | shift+arrowdown shift+arrowup", text: "Mark the rows on the way (⇧-click too); going back unmarks them" },
+      { keys: "@table.mark-down @table.mark-up | shift+arrowdown shift+arrowup", text: "Mark the rows on the way (⇧-click too); going back unmarks them" },
       { keys: "shift+pagedown shift+pageup | shift+home shift+end", text: "Mark a page down / up, or up to the first / last row" },
-      { keys: "shift+n | shift+a", text: "Sort by name / age; again: the other way" },
+      { keys: "@table.sort-name | @table.sort-age", text: "Sort by name / age; again: the other way" },
       { keys: "0 | 1 … 9", text: "All namespaces / a namespace on its number key" },
       { keys: "alt+1 … alt+9 | alt+0", text: `Hide or show a cluster's rows / show all (${comboLabel("mod")}-click its chip: only its rows)` },
       { keys: "shift+f10 | contextmenu", text: "Actions menu of the selection, as a right-click opens it" },
@@ -56,49 +58,53 @@ export const SHORTCUTS: ShortcutGroup[] = [
   {
     title: "Actions",
     rows: [
-      { keys: "s | a", text: "Shell in the pod (a node: shell on it) / attach to it" },
-      { keys: "shift+f", text: "Port-forward (a pod, service or workload)" },
-      { keys: "shift+r | shift+s", text: "Restart / scale" },
-      { keys: "ctrl+d | mod+backspace", text: "Delete" },
-      { keys: "c", text: "Copy names" },
-      { keys: "= | +", text: "Compare the marked rows / pin an object to compare others with" },
+      { keys: "@action.shell | @action.attach", text: "Shell in the pod / attach to it" },
+      { keys: "@action.node-shell", text: "Shell on the node" },
+      { keys: "@action.port-forward", text: "Port-forward (a pod, service or workload)" },
+      { keys: "@action.restart | @action.scale", text: "Restart / scale" },
+      { keys: "@action.delete", text: "Delete" },
+      { keys: "@action.copy-name", text: "Copy names" },
+      { keys: "@tab.compare | @action.compare-pin", text: "Compare the marked rows / pin an object to compare others with" },
       { keys: "mod+enter | escape", text: "Confirm / cancel the dialog" },
     ],
   },
   {
     title: "Details",
     rows: [
-      { keys: "d r l e y =", text: "Overview / Relations / Logs / Events / YAML / Compare" },
-      { keys: "f", text: "Full view — and back (Esc too)" },
-      { keys: "j k | g shift+g | space", text: "Scroll, in full view or with focus in the panel (logs: move the cursor)" },
-      { keys: "/ | mod+f", text: "Filter the logs / find in the YAML" },
-      { keys: "n | shift+n", text: "Next / previous match (logs without a query: warning or error; Compare: difference)" },
+      { keys: "@tab.overview @tab.relations @tab.logs @tab.events @tab.yaml @tab.compare", text: "Overview / Relations / Logs / Events / YAML / Compare" },
+      { keys: "@details.full", text: "Full view — and back (Esc too)" },
+      { keys: "@details.down @details.up | @details.top @details.bottom | space", text: "Scroll, in full view or with focus in the panel (logs: move the cursor)" },
+      { keys: "@yaml.find", text: "Find in the YAML" },
+      { keys: "@yaml.next-match @yaml.previous-match", text: "Next / previous match in the YAML" },
+      { keys: "@diff.next-change @diff.previous-change", text: "Compare: next / previous difference" },
     ],
   },
   {
     title: "Logs",
     rows: [
-      { keys: "j k | arrowdown arrowup", text: "Move the cursor a line (up from the first: earlier lines are read)" },
-      { keys: "shift+j shift+k", text: "Pick the lines on the way (⇧-click too)" },
-      { keys: "g | shift+g", text: "The first line / the last, following new ones" },
+      { keys: "@logs.find", text: "Filter the lines, or find in them" },
+      { keys: "@logs.down @logs.up | arrowdown arrowup", text: "Move the cursor a line (up from the first: earlier lines are read)" },
+      { keys: "@logs.pick-down @logs.pick-up", text: "Pick the lines on the way (⇧-click too)" },
+      { keys: "@logs.first | @logs.last", text: "The first line / the last, following new ones" },
       { keys: "escape", text: "Let go of the lines picked, then of the cursor" },
-      { keys: "[ | ]", text: "Previous / next warning or error" },
-      { keys: "s", text: "Pause — and resume (new lines wait meanwhile)" },
-      { keys: "x | enter", text: "Expand the cursor's line: its fields, time, source" },
-      { keys: "c", text: "Copy the lines picked, or the cursor's" },
-      { keys: "w t v h", text: "Wrap / timestamps / pretty (JSON, logfmt) / histogram" },
-      { keys: "p", text: "The previous containers' logs (crashed ones)" },
-      { keys: "mod+s", text: "Save the lines shown to a file" },
+      { keys: "@logs.next-match @logs.previous-match", text: "Next / previous match (without a query: warning or error)" },
+      { keys: "@logs.previous-problem | @logs.next-problem", text: "Previous / next warning or error" },
+      { keys: "@logs.pause", text: "Pause — and resume (new lines wait meanwhile)" },
+      { keys: "@logs.expand | enter", text: "Expand the cursor's line: its fields, time, source" },
+      { keys: "@logs.copy", text: "Copy the lines picked, or the cursor's" },
+      { keys: "@logs.wrap @logs.timestamps @logs.pretty @logs.histogram", text: "Wrap / timestamps / pretty (JSON, logfmt) / histogram" },
+      { keys: "@logs.previous-containers", text: "The previous containers' logs (crashed ones)" },
+      { keys: "@logs.save", text: "Save the lines shown to a file" },
       { keys: "alt+c alt+r alt+f", text: "In the query: match case / regular expression / filter or find" },
       { keys: "enter tab | ctrl+space", text: "In the query: take the suggestion highlighted / suggest here" },
-      { keys: "l", text: "On several marked rows: their logs together, in the dock" },
+      { keys: "@tab.logs", text: "On several marked rows: their logs together, in the dock" },
     ],
   },
   {
     title: "Terminals",
     rows: [
-      { keys: "mod+j", text: "Show the dock and go to its terminal; again: hide it" },
-      { keys: "mod+shift+j", text: "The same, from inside a terminal (every other key is the terminal's)" },
+      { keys: "@dock.toggle", text: "Show the dock and go to its terminal; again: hide it" },
+      { keys: "@dock.toggle-from-terminal", text: "The same, from inside a terminal (every other key is the terminal's)" },
       { keys: "enter", text: "In a session that ended: start a new one" },
     ],
   },
@@ -122,27 +128,44 @@ export const SHORTCUTS: ShortcutGroup[] = [
   },
 ];
 
-/** Words of a row to search in: what it does and the keys as written, for "logs", "⌘K", "shift". */
-const haystack = (row: ShortcutRow) =>
-  `${row.text} ${row.keys
+/** What the keys of a row show, in order: key caps, and the marks between them. */
+type KeyPart = { kbd: string } | { sep: string };
+
+function keyParts(keys: string): KeyPart[] {
+  const tokens = keys.split(/\s+/);
+  const oneCommand = tokens.filter((t) => t.startsWith("@")).length === 1;
+  const out: KeyPart[] = [];
+  for (const token of tokens) {
+    if (token === "|") out.push({ sep: "/" });
+    else if (token === "…") out.push({ sep: "…" });
+    else if (token.startsWith("hold:")) out.push({ sep: "hold" }, { kbd: comboLabel(token.slice(5)) });
+    else if (token.startsWith("@")) {
+      const combos = keysOf(token.slice(1)).slice(0, oneCommand ? undefined : 1);
+      // None: the settings took them away.
+      if (!combos.length) out.push({ sep: "—" });
+      combos.forEach((combo, i) => {
+        if (i) out.push({ sep: "/" });
+        out.push({ kbd: comboLabel(combo) });
+      });
+    } else out.push({ kbd: comboLabel(token) });
+  }
+  return out;
+}
+
+/** The combos a row's keys name (a command's: every one it has), as written and as shown. */
+const rowCombos = (keys: string) =>
+  keys
     .split(/\s+/)
     .filter((t) => t !== "|" && t !== "…")
-    .map((t) => `${t} ${comboLabel(t.replace(/^hold:/, ""))}`)
-    .join(" ")}`.toLowerCase();
+    .flatMap((t) => (t.startsWith("@") ? keysOf(t.slice(1)) : [t.replace(/^hold:/, "")]));
+
+/** Words of a row to search in: what it does and its keys as written and as shown, for "logs", "⌘K", "shift". */
+const haystack = (row: ShortcutRow) => `${row.text} ${rowCombos(row.keys).map((c) => `${c} ${comboLabel(c)}`).join(" ")}`.toLowerCase();
 
 export function Keys(props: { keys: string }) {
   return (
     <span class="sc-keys">
-      <For each={props.keys.split(/\s+/)}>
-        {(token) => (
-          <Show when={token !== "|" && token !== "…"} fallback={<span class="sc-sep">{token === "|" ? "/" : "…"}</span>}>
-            <Show when={token.startsWith("hold:")} fallback={<span class="kbd">{comboLabel(token)}</span>}>
-              <span class="sc-sep">hold</span>
-              <span class="kbd">{comboLabel(token.slice(5))}</span>
-            </Show>
-          </Show>
-        )}
-      </For>
+      <For each={keyParts(props.keys)}>{(part) => ("kbd" in part ? <span class="kbd">{part.kbd}</span> : <span class="sc-sep">{part.sep}</span>)}</For>
     </span>
   );
 }

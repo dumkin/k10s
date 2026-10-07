@@ -4,8 +4,9 @@ import { findIssues, isEventIssue, type Instance, type Issue, type Severity, SEV
 import { zoneOf } from "../lib/clusters";
 import { age } from "../lib/format";
 import { HELM_RELEASES } from "../lib/helm";
-import { type Binding, bindAll, comboLabel } from "../lib/hotkeys";
+import { type Binding, bindAll, keyLabel } from "../lib/hotkeys";
 import { isError, isForbidden } from "../lib/k8s";
+import { keyOf } from "../lib/keymap";
 import { catalogEntry } from "../registry/catalog";
 import { clusterColor, clusterStatus, discoveredResources, selectedClusters, shortName, zoneFamilyOf } from "../state/clusters";
 import { focusInSidebar, modalOpen, onControl } from "../state/keyboard";
@@ -28,6 +29,7 @@ import {
   setAttentionSeverity as setOnlySeverity,
 } from "../state/attention";
 import { Icon, type IconName } from "./Icon";
+import { Kbd } from "./Kbd";
 
 /**
  * What is watched for trouble: workloads, their pods, nodes, claims, autoscalers, Helm releases, a few custom
@@ -233,12 +235,12 @@ export function AttentionView() {
       bindAll(
         (
           [
-          { combo: "j", run: () => move(1) },
+          { id: "attention.down", run: () => move(1) },
           { combo: "arrowdown", run: () => move(1) },
-          { combo: "k", run: () => move(-1) },
+          { id: "attention.up", run: () => move(-1) },
           { combo: "arrowup", run: () => move(-1) },
-          { combo: "g", run: () => move(-Infinity) },
-          { combo: "shift+g", run: () => move(Infinity) },
+          { id: "attention.first", run: () => move(-Infinity) },
+          { id: "attention.last", run: () => move(Infinity) },
           {
             combo: "enter",
             run: (e) => {
@@ -258,7 +260,7 @@ export function AttentionView() {
           },
           { combo: "arrowright", run: () => void (current() && !expanded().has(current()!.key) && toggle(current()!.key)) },
           { combo: "arrowleft", run: () => void (current() && expanded().has(current()!.key) && toggle(current()!.key)) },
-          { combo: "/", run: () => filterInput?.focus() },
+          { id: "attention.filter", run: () => filterInput?.focus() },
           {
             combo: "escape",
             inInputs: true,
@@ -312,10 +314,10 @@ export function AttentionView() {
             )}
           </For>
         </div>
-        <div class="filter search-field" data-hint="/">
+        <div class="filter search-field" data-hint={keyOf("attention.filter")}>
           <Icon name="filter" size={13} />
           <input ref={filterInput} class="input" placeholder="Filter by name, reason, cluster" aria-label="Filter" value={filter()} onInput={(e) => setFilter(e.currentTarget.value)} spellcheck={false} />
-          <Show when={filter()} fallback={<span class="kbd">/</span>}>
+          <Show when={filter()} fallback={<Kbd id="attention.filter" />}>
             <button class="clear" onClick={() => setFilter("")} aria-label="Clear the filter">
               <Icon name="x" size={12} />
             </button>
@@ -432,8 +434,16 @@ export function AttentionView() {
           </div>
         </Show>
         <div class="att-help faint">
-          <span class="kbd">j</span>
-          <span class="kbd">k</span> move · <span class="kbd">↵</span> open · <span class="kbd">space</span> show objects · <span class="kbd">{comboLabel("mod+[")}</span> back here from an object
+          <Kbd id="attention.down" />
+          <Kbd id="attention.up" /> move · <span class="kbd">↵</span> open · <span class="kbd">space</span> show objects
+          <Show when={keyLabel("nav.back")}>
+            {(back) => (
+              <>
+                {" "}
+                · <span class="kbd">{back()}</span> back here from an object
+              </>
+            )}
+          </Show>
         </div>
       </div>
     </div>

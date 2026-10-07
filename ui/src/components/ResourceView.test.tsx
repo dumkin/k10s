@@ -61,8 +61,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** A fresh app (state, shortcuts) as on macOS or elsewhere, with the resource view mounted. */
-async function mount(platform: "MacIntel" | "Linux x86_64") {
+/**
+ * A fresh app (state, shortcuts) as on macOS or elsewhere, with the resource view mounted — after `before`, which may
+ * register what the view takes in as it mounts (the details tabs).
+ */
+async function mount(platform: "MacIntel" | "Linux x86_64", before?: () => Promise<unknown>) {
   vi.resetModules();
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
   const hotkeys = await import("../lib/hotkeys");
@@ -70,6 +73,7 @@ async function mount(platform: "MacIntel" | "Linux x86_64") {
   const ui = await import("../state/ui");
   const views = await import("../state/views");
   const { ResourceView } = await import("./ResourceView");
+  await before?.();
   hotkeys.installHotkeys();
   const disposeViews = createRoot((d) => {
     views.initViews();
@@ -506,5 +510,62 @@ describe("cluster pills", () => {
     press(document.body, { key: "™", code: "Digit2", altKey: true });
     expect(engine.connect.mock.calls).toEqual([["prod-eu-z1"]]);
     expect(engine.reconnect.mock.calls).toEqual([["prod-eu-z2"]]);
+  });
+});
+
+describe("keys from settings.json", () => {
+  const key = (init: KeyboardEventInit) => press(document.body, init);
+  let copied: string[];
+
+  beforeEach(() => {
+    copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  });
+  afterEach(() => Reflect.deleteProperty(navigator, "clipboard"));
+
+  /** The view with the details tabs, its settings in a file that `edit` changes "outside the app". */
+  async function withFile() {
+    const app = await mount("Linux x86_64", () => import("../details"));
+    const persist = await import("../lib/persist");
+    persist.useFiles({ settings: {}, state: {}, settingsError: null, settingsPath: null, statePath: null }, async () => {}, async () => {});
+    return { ...app, edit: (keys: unknown) => persist.settingsEdited({ keys }, null) };
+  }
+
+  it("open the tabs and run the actions on the keys it gives them, from the moment it changes", async () => {
+    const { nav, ui, edit } = await withFile();
+    nav.setSelectedKey("z1/pod-5");
+    key({ key: "y", code: "KeyY" });
+    expect([nav.detailsOpen(), nav.detailsTab()]).toEqual([true, "yaml"]);
+    nav.closeDetails();
+
+    edit({ tab: { yaml: "shift+y" }, action: { "copy-name": "alt+c", delete: null } });
+    expect(key({ key: "y", code: "KeyY" }).defaultPrevented).toBe(false);
+    expect(nav.detailsOpen()).toBe(false);
+    key({ key: "Y", code: "KeyY", shiftKey: true });
+    expect([nav.detailsOpen(), nav.detailsTab()]).toEqual([true, "yaml"]);
+    nav.closeDetails();
+    expect(key({ key: "c", code: "KeyC" }).defaultPrevented).toBe(false);
+    key({ key: "c", code: "KeyC", altKey: true });
+    await Promise.resolve();
+    expect(copied).toEqual(["pod-5"]);
+    // No keys: delete is not asked for, by either of its own.
+    expect(key({ key: "d", code: "KeyD", ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(key({ key: "Backspace", code: "Backspace", ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(ui.dialog()).toBeNull();
+  });
+
+  it("run the action of a tab's key on several marked rows, and name the keys in the marks' toolbar", async () => {
+    const { nav, edit } = await withFile();
+    nav.setMarked(new Set(["z1/pod-1", "z1/pod-2"]));
+    const tool = (title: RegExp) => [...document.querySelectorAll<HTMLButtonElement>(".tools button")].find((b) => title.test(b.title));
+    expect([tool(/^Copy 2 names/)?.title, tool(/^Compare 2/)?.title]).toEqual(["Copy 2 names (C)", "Compare 2 (=)"]);
+
+    edit({ tab: { compare: "alt+=" }, action: { "copy-name": "alt+c" } });
+    expect([tool(/^Copy 2 names/)?.title, tool(/^Compare 2/)?.title]).toEqual(["Copy 2 names (Alt+C)", "Compare 2 (Alt+=)"]);
+    expect(key({ key: "=", code: "Equal" }).defaultPrevented).toBe(false);
+    expect(nav.detailsOpen()).toBe(false);
+    // The first marked row, compared with the other.
+    key({ key: "=", code: "Equal", altKey: true });
+    expect([nav.detailsOpen(), nav.selectedKey(), nav.detailsTab()]).toEqual([true, "z1/pod-1", "compare"]);
   });
 });
