@@ -25,6 +25,7 @@ On Linux and Windows, `⌘` is `Ctrl` (so `⌃D` is also `Ctrl+D`), `⌥` is `Al
 | --- | --- |
 | `j` `k` `↑` `↓` `g` `G` `PgUp` `PgDn` | move |
 | `/`, `⌘F` | filter (`Esc` clears it, a second `Esc` leaves the field) |
+| `↑` in the filter | the filters used lately, those holding what is typed: `↵` applies one, `⇧⌫` forgets it. The filter's icon lists all of them |
 | `↵` | details |
 | `0` / `1` … `9` | all namespaces / the namespace on that digit, like k9s favorites: those from your kubeconfig first, then recent ones |
 | `⌥1` … `⌥9` / `⌥0` | hide or show the rows of cluster N (like clicking its chip) / show all. `⌘`-click a chip (on macOS `⌃`-click too): only that cluster's rows; again: every cluster's |
@@ -51,6 +52,8 @@ The filter is a list of terms, all of which must match:
 | `app=web,tier=frontend` | all of these labels |
 | `"a=b"` | the substring `a=b`, not a label |
 
+A filter is remembered once it was used: when the keyboard leaves the field, on `↵`, or when it is cleared or replaced after it stood a moment (a typo dropped at once is not). The table keeps the last 20, of every resource; the log query keeps its own 30.
+
 Actions apply to the marked rows if there are any, otherwise to the selected row, and only to visible ones: marks on rows hidden by the filter or by a hidden cluster are left alone.
 
 ## Details
@@ -76,6 +79,7 @@ Actions apply to the marked rows if there are any, otherwise to the selected row
 | `w` `t` `v` `h` `p` | wrap, timestamps, pretty JSON/logfmt, histogram, previous container |
 | `⌘S` | save what's shown |
 | `↵` `Tab` · `⌃Space` (in the query) | take the highlighted suggestion · suggest here |
+| `↑` (in the query) | the queries used lately, those holding what is typed (`⇧⌫` forgets one); the query's icon lists all of them |
 | `⌥C` `⌥R` `⌥F` (in the query) | match case · the whole query as one regex · filter or search |
 | `Esc` | drop the selection, then the cursor |
 

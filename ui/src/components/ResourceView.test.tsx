@@ -327,6 +327,133 @@ describe("keyboard", () => {
   });
 });
 
+describe("recent filters", () => {
+  const input = () => document.querySelector<HTMLInputElement>(".view-header .filter input")!;
+  const type = (text: string) => {
+    input().focus();
+    input().value = text;
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const key = (init: KeyboardEventInit) => press(input(), init);
+  const shown = () => [...document.querySelectorAll(".recent-menu .opt .recent-text")].map((e) => e.textContent);
+  const highlighted = () => document.querySelector(".recent-menu .opt.hl .recent-text")?.textContent;
+
+  beforeAll(() => {
+    // jsdom does not scroll: the highlight is shown by doing nothing.
+    Element.prototype.scrollIntoView ??= () => {};
+  });
+  beforeEach(() => localStorage.removeItem("k10s:recentFilters"));
+
+  it("remembers a filter on Enter or as the keyboard leaves it, and offers it back on ↑", async () => {
+    const { nav } = await mount("MacIntel");
+    type("pod-1");
+    key({ key: "Enter", code: "Enter" });
+    type("payments");
+    input().blur();
+    expect(nav.recentFilters.list()).toEqual(["payments", "pod-1"]);
+
+    // ↑ in the field: the most recent first, highlighted; ↓ goes down the menu, not to the table.
+    type("");
+    expect(key({ key: "ArrowUp", code: "ArrowUp" }).defaultPrevented).toBe(true);
+    expect([shown(), highlighted()]).toEqual([["payments", "pod-1"], "payments"]);
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    expect([highlighted(), nav.selectedKey()]).toEqual(["pod-1", null]);
+    // Enter applies it; the keyboard stays in the field, and the filter is the most recent now.
+    key({ key: "Enter", code: "Enter" });
+    expect([nav.filter(), document.activeElement === input(), document.querySelector(".recent-menu")]).toEqual(["pod-1", true, null]);
+    expect(nav.recentFilters.list()).toEqual(["pod-1", "payments"]);
+
+    // What is typed: those holding it; typing on narrows them, and with none left the menu goes.
+    type("pay");
+    key({ key: "ArrowUp", code: "ArrowUp" });
+    expect(shown()).toEqual(["payments"]);
+    type("payx");
+    expect(document.querySelector(".recent-menu")).toBeNull();
+    // Nothing holds what is typed: ↑ is the field's.
+    expect(key({ key: "ArrowUp", code: "ArrowUp" }).defaultPrevented).toBe(false);
+  });
+
+  it("leaves ↓ and Esc to the filter while the menu is closed; open, Esc closes it first", async () => {
+    const { nav } = await mount("MacIntel");
+    nav.recentFilters.remember("pod-1");
+    type("");
+    key({ key: "ArrowUp", code: "ArrowUp" });
+    expect(shown()).toEqual(["pod-1"]);
+    key({ key: "Escape", code: "Escape" });
+    expect([document.querySelector(".recent-menu"), document.activeElement === input()]).toEqual([null, true]);
+    // ↓ goes to the table, as it did; the filter the keyboard leaves is remembered.
+    type("pod-5");
+    key({ key: "ArrowDown", code: "ArrowDown" });
+    expect([document.activeElement === input(), nav.selectedKey()]).toEqual([false, "z1/pod-5"]);
+    expect(nav.recentFilters.list()).toEqual(["pod-5", "pod-1"]);
+  });
+
+  it("remembers a filter cleared or replaced once it stood a while — not a typo dropped at once, nor one forgotten", async () => {
+    const { nav } = await mount("MacIntel");
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    type("pdo-1");
+    key({ key: "Escape", code: "Escape" });
+    expect([nav.filter(), nav.recentFilters.list()]).toEqual(["", []]);
+    type("pod-1");
+    now += 2000;
+    key({ key: "Escape", code: "Escape" });
+    expect([nav.filter(), nav.recentFilters.list()]).toEqual(["", ["pod-1"]]);
+    // Another resource opened replaces it.
+    type("pod-2");
+    now += 2000;
+    nav.navigate("deployments");
+    expect(nav.recentFilters.list()).toEqual(["pod-2", "pod-1"]);
+
+    // Forgotten as it stands (⇧⌫ in the menu): clearing it, or leaving it, does not bring it back.
+    nav.navigate("pods");
+    type("pod-3");
+    key({ key: "Enter", code: "Enter" });
+    key({ key: "ArrowUp", code: "ArrowUp" });
+    expect(highlighted()).toBe("pod-3");
+    expect(key({ key: "Backspace", code: "Backspace", shiftKey: true }).defaultPrevented).toBe(true);
+    expect(document.querySelector(".recent-menu")).toBeNull();
+    now += 2000;
+    key({ key: "Escape", code: "Escape" });
+    input().blur();
+    expect([nav.filter(), nav.recentFilters.list()]).toEqual(["", ["pod-2", "pod-1"]]);
+  });
+
+  it("opens every one from the filter's icon, the keyboard staying in the field; a click picks, × and Forget all forget", async () => {
+    const { nav } = await mount("MacIntel");
+    nav.recentFilters.remember("pod-1");
+    nav.recentFilters.remember("pod-2");
+    nav.recentFilters.remember("payments");
+    type("zzz");
+    const icon = document.querySelector<HTMLElement>(".view-header .recent-btn")!;
+    const down = () => {
+      const e = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      icon.dispatchEvent(e);
+      return e;
+    };
+    expect(down().defaultPrevented).toBe(true);
+    expect([shown(), document.activeElement === input()]).toEqual([["payments", "pod-2", "pod-1"], true]);
+    // ×: that one goes, the menu stays.
+    document.querySelector<HTMLElement>(".recent-menu .opt .opt-actions .btn")!.click();
+    expect(shown()).toEqual(["pod-2", "pod-1"]);
+    // A click on one applies it.
+    [...document.querySelectorAll<HTMLElement>(".recent-menu .opt")].find((o) => o.textContent === "pod-1")!.click();
+    expect([nav.filter(), nav.recentFilters.list(), document.querySelector(".recent-menu")]).toEqual(["pod-1", ["pod-1", "pod-2"], null]);
+    // Forget all: the menu goes, and says how it fills once opened again.
+    down();
+    [...document.querySelectorAll<HTMLElement>(".recent-menu .recent-foot .btn")].find((b) => b.textContent === "Forget all")!.click();
+    expect([nav.recentFilters.list(), document.querySelector(".recent-menu")]).toEqual([[], null]);
+    down();
+    expect(document.querySelector(".recent-menu .recent-empty")?.textContent).toBe("Filters you use show up here.");
+    // A second click closes it, and so does a click elsewhere.
+    down();
+    expect(document.querySelector(".recent-menu")).toBeNull();
+    down();
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    expect(document.querySelector(".recent-menu")).toBeNull();
+  });
+});
+
 describe("marking rows from the keyboard", () => {
   const key = (init: KeyboardEventInit) => press(document.body, init);
   const marks = (nav: Awaited<ReturnType<typeof mount>>["nav"]) => [...nav.marked()].map((k) => Number(k.slice("z1/pod-".length))).sort((a, b) => a - b);

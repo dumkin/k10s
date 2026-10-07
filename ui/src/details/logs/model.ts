@@ -2,6 +2,7 @@ import { stripAnsi } from "../../lib/ansi";
 import type { LogLine } from "../../lib/backend";
 import { humanDuration } from "../../lib/format";
 import { arrayOf, isBoolean, isNumber, isString, persisted, setting } from "../../lib/persist";
+import { recentList } from "../../lib/recent";
 import { type FieldValue, Level, structure, type Structured } from "../../lib/logs/parse";
 import { patternOf, PatternIds } from "../../lib/logs/patterns";
 import { compile, isEmpty, type Query, queryKey, type Subject } from "../../lib/logs/query";
@@ -33,7 +34,8 @@ export const [matchCase, setMatchCase] = persisted("logs.matchCase", false, isBo
 export const [regexMode, setRegexMode] = persisted("logs.regex", false, isBoolean);
 /** The query hides the lines it does not match (else it finds them: all lines stay, matches are highlighted). */
 export const [filterMode, setFilterMode] = persisted("logs.filterMode", true, isBoolean);
-export const [queryHistory, setQueryHistory] = persisted("logs.queries", [] as string[], arrayOf(isString));
+/** Queries used lately, in any log (↑ in the query, or a click on its icon). */
+export const recentQueries = recentList("logs.queries", 30);
 /** Fields shown as columns (of the lines that have them). */
 export const [pinned, setPinned] = setting("logs.columns", [] as string[], arrayOf(isString));
 // "All lines" is deliberately not remembered: picked once for a pod, it would pull the whole history of every
@@ -42,12 +44,8 @@ export const [tail, setTail] = setting("logs.tail", 1000, (v): v is number => TA
 /** A stretch of time to read instead of a number of lines (seconds; 0: off). */
 export const [since, setSince] = setting("logs.since", 0, (v): v is number => isNumber(v) && (v === 0 || SINCES.includes(v)));
 
-/** Remembers a query (most recent first, without repeats). */
-export function rememberQuery(q: string) {
-  const s = q.trim();
-  if (!s) return;
-  setQueryHistory([s, ...queryHistory().filter((x) => x !== s)].slice(0, 30));
-}
+/** Remembers a query used (the most recent first, without repeats). */
+export const rememberQuery = (q: string) => recentQueries.remember(q);
 
 export function togglePinned(key: string) {
   setPinned(pinned().includes(key) ? pinned().filter((k) => k !== key) : [...pinned(), key]);

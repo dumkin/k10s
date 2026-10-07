@@ -223,6 +223,7 @@ You need Rust and Node.js; [CONTRIBUTING.md](CONTRIBUTING.md) has the details. T
 | ⌘K, `:` | command palette, k9s-style commands |
 | ⌘⇧C, ⌘⇧N | clusters, namespaces |
 | `j` `k`, `/`, `↵` | move, filter, open details |
+| `/`, then `↑` | the filters and log queries you used lately |
 | `d` `r` `l` `e` `y` `=` | Overview, Relations, Logs, Events, YAML, Compare |
 | `Space` or `⇧J` `⇧K`, then `l` or `=` | mark rows, then see their logs together or compare them |
 | ⌥-click | copy a cell, like a pod's IP |

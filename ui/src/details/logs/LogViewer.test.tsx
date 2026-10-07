@@ -9,7 +9,7 @@ import type { UIRow } from "../../state/view";
 import { LogsTab } from "../LogsTab";
 import { hover } from "./LogStrip";
 import { budget, timing } from "./LogViewer";
-import { setFilterMode, setFold, setPinned, setPretty, setUtc } from "./model";
+import { recentQueries, setFilterMode, setFold, setPinned, setPretty, setUtc } from "./model";
 
 // The log view as a whole: a pod's stream (the engine is a recorder), what the filters and the keys do to it.
 const h = vi.hoisted(() => ({
@@ -615,6 +615,72 @@ describe("log view", () => {
     await click(byText(".ld-actions button", "Copy JSON"));
     expect(JSON.parse(copied.at(-1)!)).toEqual({ level: "warn", msg: "slow commit", trace_id: "abc123", latency_ms: 2205 });
     expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied JSON", detail: undefined });
+  });
+
+  it("offers the queries used lately on ↑ and from its icon: Enter applies the one highlighted, in place of the fields'", async () => {
+    // jsdom does not scroll: the highlight is shown by doing nothing.
+    Element.prototype.scrollIntoView ??= () => {};
+    recentQueries.clear();
+    const { root, s } = await mount();
+    s.send({
+      t: "lines",
+      l: [
+        [0, 1000, "GET /healthz 200"],
+        [0, 2000, "POST /orders 500 timeout"],
+        [0, 3000, '{"level":"info","msg":"GET /orders 200","status":200}'],
+      ],
+    });
+    await tick();
+    const input = root.querySelector<HTMLInputElement>(".lq-input")!;
+    const type = async (text: string) => {
+      input.focus();
+      input.value = text;
+      input.setSelectionRange(text.length, text.length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await tick();
+    };
+    const press = async (k: string, opts: KeyboardEventInit = {}) => {
+      const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...opts });
+      input.dispatchEvent(e);
+      await tick();
+      return e;
+    };
+    const shown = () => [...root.querySelectorAll(".lq .recent-menu .opt .recent-text")].map((e) => e.textContent);
+    // Used: Enter, or the keyboard leaving the field.
+    await type("timeout");
+    await press("Enter");
+    await type("!healthz");
+    input.blur();
+    expect(recentQueries.list()).toEqual(["!healthz", "timeout"]);
+
+    // ↑: the most recent first; Enter applies the one highlighted, and the field keeps the keyboard.
+    await type("");
+    expect((await press("ArrowUp")).defaultPrevented).toBe(true);
+    expect(shown()).toEqual(["!healthz", "timeout"]);
+    await press("ArrowDown");
+    await press("Enter");
+    expect([input.value, lines(root), document.activeElement === input, root.querySelector(".recent-menu")]).toEqual(["timeout", ["POST /orders 500 timeout"], true, null]);
+    expect(recentQueries.list()).toEqual(["timeout", "!healthz"]);
+
+    // While fields are suggested, ↑ goes through them; else it shows the queries holding what is typed (none: nothing).
+    await type("sta");
+    expect(root.querySelector(".lq-sg")).not.toBeNull();
+    await press("ArrowUp");
+    expect([root.querySelector(".lq-sg") !== null, root.querySelector(".lq .recent-menu")]).toEqual([true, null]);
+    await press("Escape");
+    expect((await press("ArrowUp")).defaultPrevented).toBe(false);
+    expect(root.querySelector(".lq .recent-menu")).toBeNull();
+    await type("health");
+    await press("ArrowUp");
+    expect(shown()).toEqual(["!healthz"]);
+    await press("Escape");
+    expect([root.querySelector(".recent-menu"), input.value]).toEqual([null, "health"]);
+
+    // The icon: every one, whatever is typed.
+    const icon = root.querySelector<HTMLElement>(".lq .recent-btn")!;
+    icon.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await tick();
+    expect(shown()).toEqual(["timeout", "!healthz"]);
   });
 
   it("folds a long stack trace into its first lines, and unfolds it", async () => {

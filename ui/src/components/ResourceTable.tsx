@@ -18,9 +18,9 @@ import {
   openDetails,
   REVEAL_TIMEOUT_MS,
   rememberedNamespaces,
+  replaceFilter,
   resourceTitle,
   selectedKey,
-  setFilter,
   setNamespaces,
   setSelectedKey,
   toggleMark,
@@ -461,7 +461,7 @@ function TableOverlay(p: { feed: ViewFeed; model: TableModel; title: string }) {
               <Icon name="filter" size={22} />
             </span>
             <h3>No matches for “{filter()}”</h3>
-            <button class="btn" onClick={() => batch(() => setFilter(""))}>
+            <button class="btn" onClick={() => batch(() => replaceFilter(""))}>
               Clear filter
             </button>
           </Match>

@@ -1,14 +1,16 @@
 import { type Accessor, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Icon } from "../../components/Icon";
 import { Highlight } from "../../components/Popover";
+import { createRecentMenu } from "../../components/RecentMenu";
 import { count } from "../../lib/format";
-import { keyed } from "../../lib/hotkeys";
+import { comboLabel, keyed } from "../../lib/hotkeys";
 import { keyOf } from "../../lib/keymap";
 import { applyAt, type Spot, spotAt } from "../../lib/logs/complete";
 import { describeQuery, type Query } from "../../lib/logs/query";
+import { KEPT_MS } from "../../lib/recent";
 import { indexAtPos } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
-import { filterMode, matchCase, queryHistory, regexMode, rememberQuery, setFilterMode, setMatchCase, setRegexMode } from "./model";
+import { filterMode, matchCase, recentQueries, regexMode, rememberQuery, setFilterMode, setMatchCase, setRegexMode } from "./model";
 import { Catalog, type Suggestion } from "./suggest";
 
 const HELP = [
@@ -47,9 +49,41 @@ export function QueryField(props: {
   let box!: HTMLDivElement;
   let list: HTMLDivElement | undefined;
   const [focused, setFocused] = createSignal(false);
-  // Going through the history with ↑/↓: where, and what was typed before.
-  let at = -1;
-  let typed = "";
+  /** When the query got the text it has here (typed, taken from a menu). */
+  let since = 0;
+  /** The query as it stood when it was forgotten from the recent ones: it is not remembered again while it stays so. */
+  let forgotten: string | null = null;
+  /** The query was used (Enter, the keyboard left it): it is remembered. */
+  const remember = () => {
+    if (props.text() !== forgotten) rememberQuery(props.text());
+  };
+  /** Puts `text` in the field, the caret at its end. */
+  const put = (text: string) => {
+    since = Date.now();
+    forgotten = null;
+    props.setText(text);
+    input.value = text;
+    input.setSelectionRange(text.length, text.length);
+    sync();
+  };
+  /** The queries used lately: ↑ in the query, or a click on its icon. */
+  const recent = createRecentMenu({
+    list: recentQueries.list,
+    text: () => props.text(),
+    pick: (q) => {
+      put(q);
+      props.flush();
+      rememberQuery(q);
+    },
+    forget: (q) => {
+      if (q === null) recentQueries.clear();
+      else recentQueries.forget(q);
+      // The query standing goes with it: leaving the field must not bring it back.
+      if (q === null || q === props.text().trim()) forgotten = props.text();
+    },
+    title: "Recent queries",
+    empty: "Queries you use show up here.",
+  });
   /** Width of a character of the input (monospaced): the suggestions open under what they complete. */
   let charW = 7;
   onMount(() => {
@@ -102,7 +136,8 @@ export function QueryField(props: {
   /** Suggests for the caret's spot (`explicit`: asked for — between terms too, and what is typed whole). */
   const suggest = (explicit = false) => {
     const caret = input.selectionStart ?? input.value.length;
-    if (regexMode() || document.activeElement !== input || caret !== input.selectionEnd) return setSg(null);
+    // The recent queries are shown in its place.
+    if (recent.shown() || regexMode() || document.activeElement !== input || caret !== input.selectionEnd) return setSg(null);
     const spot = spotAt(input.value, caret, explicit);
     if (!spot) return setSg(null);
     const items = catalogNow().at(spot);
@@ -129,7 +164,7 @@ export function QueryField(props: {
     const it = s?.items[k];
     if (!s || !it) return;
     const r = applyAt(input.value, s.spot, it.text);
-    at = -1;
+    since = Date.now();
     setSg(null);
     props.setText(r.input);
     input.value = r.input;
@@ -147,6 +182,7 @@ export function QueryField(props: {
   };
 
   const onKey = (e: KeyboardEvent) => {
+    if (recent.key(e)) return;
     const s = sg();
     if (s) {
       const ctrl = e.ctrlKey && !e.metaKey && !e.altKey;
@@ -181,24 +217,16 @@ export function QueryField(props: {
         return;
       }
     }
-    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      const list = queryHistory();
-      if (!list.length) return;
-      e.preventDefault();
-      if (at < 0) typed = props.text();
-      at = e.key === "ArrowUp" ? Math.min(list.length - 1, at + 1) : at - 1;
-      props.setText(at < 0 ? typed : list[at]);
-      queueMicrotask(() => {
-        input.setSelectionRange(input.value.length, input.value.length);
-        sync();
-      });
+    // ↑, as in a shell: the queries used lately — those holding what is typed.
+    if (e.key === "ArrowUp" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
+      if (recent.show()) e.preventDefault();
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
       setSg(null);
       props.flush();
-      rememberQuery(props.text());
+      remember();
       // Finding: Enter goes to the next match (⇧Enter the previous); filtering, it hands the keys back to the lines.
       if (finding()) props.jump(e.shiftKey ? -1 : 1);
       else input.blur();
@@ -206,8 +234,11 @@ export function QueryField(props: {
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (props.text()) props.setText("");
-      else input.blur();
+      if (props.text()) {
+        // A query that stood long enough to be looked at was used; one typed and dropped at once was not.
+        if (Date.now() - since >= KEPT_MS) remember();
+        props.setText("");
+      } else input.blur();
     }
   };
   /** The caret moved: the suggestions (when shown) follow it, or go. */
@@ -217,8 +248,31 @@ export function QueryField(props: {
   };
 
   return (
-    <div class="lq" classList={{ invalid: !!props.query().error, focused: focused(), finding: !filterMode() }} data-hint={keyOf("logs.find")} data-hint-ctx="details" title={sg() ? undefined : props.query().terms.length || props.query().error ? describeQuery(props.query()) : HELP}>
-      <Icon name={filterMode() ? "filter" : "search"} size={12} />
+    <div
+      class="lq"
+      classList={{ invalid: !!props.query().error, focused: focused(), finding: !filterMode() }}
+      data-hint={keyOf("logs.find")}
+      data-hint-ctx="details"
+      title={sg() || recent.shown() ? undefined : props.query().terms.length || props.query().error ? describeQuery(props.query()) : HELP}
+    >
+      <button
+        class="recent-btn"
+        tabIndex={-1}
+        title={`Recent queries (${comboLabel("arrowup")})`}
+        aria-label="Recent queries"
+        aria-haspopup="listbox"
+        aria-expanded={recent.shown()}
+        // The field keeps the keyboard (or gets it): the menu's keys go through it.
+        onMouseDown={(e) => {
+          e.preventDefault();
+          input.focus();
+          setSg(null);
+          recent.toggle();
+        }}
+      >
+        <Icon name={filterMode() ? "filter" : "search"} size={12} />
+        <Icon name="chevron-down" size={8} strokeWidth={2.2} />
+      </button>
       <div class="lq-box" ref={box}>
         <div class="lq-overlay" ref={overlay} aria-hidden="true">
           <For each={spans()}>{(s) => (s.kind ? <span class={`q-${s.kind}`}>{s.text}</span> : s.text)}</For>
@@ -232,14 +286,16 @@ export function QueryField(props: {
           spellcheck={false}
           autocomplete="off"
           role="combobox"
-          aria-expanded={!!sg()}
+          aria-expanded={!!sg() || recent.shown()}
           aria-autocomplete="list"
           placeholder={filterMode() ? "Filter: words, !word, key:value, /regex/" : "Find: words, !word, key:value, /regex/"}
           value={props.text()}
           onInput={(e) => {
-            at = -1;
+            since = Date.now();
+            forgotten = null;
             props.setText(e.currentTarget.value);
             sync();
+            recent.typed();
             suggest();
           }}
           onKeyDown={onKey}
@@ -251,7 +307,8 @@ export function QueryField(props: {
           onBlur={() => {
             setFocused(false);
             setSg(null);
-            rememberQuery(props.text());
+            recent.hide();
+            remember();
           }}
         />
         <Show when={sg()}>
@@ -318,6 +375,7 @@ export function QueryField(props: {
       >
         <Icon name="filter" size={11} />
       </button>
+      <recent.View />
     </div>
   );
 }
