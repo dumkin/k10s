@@ -143,6 +143,45 @@ describe("LogBuffer", () => {
     expect(b.lines[b.lines.length - 1].text).toBe("l249");
   });
 
+  it("keeps the lines being read, up to one and a half times the budget, then drops as few as it takes", () => {
+    const b = new LogBuffer(1e9, 100);
+    const line = (k: number): LogLine => [0, 1000 + k, `l${k}`];
+    b.add(Array.from({ length: 100 }, (_, k) => line(k)));
+    // The view draws from position 40 on: what is before it goes, down to 90 entries as usual.
+    b.hold = () => 40;
+    b.add([line(100), line(101)]);
+    expect(b.dropped).toBe(12);
+    expect(b.lines[0].text).toBe("l12");
+    // Then the lines before position 40 go as more come, and none after it: the buffer grows past its budget instead.
+    for (let k = 102; k < 150; k++) b.add([line(k)]);
+    expect(b.lines[0].pos).toBe(40);
+    expect(b.lines.length).toBe(110);
+    expect(b.room()).toBe(true);
+    // Past one and a half times: down to 1.4 times — the held lines go too, the oldest first.
+    for (let k = 150; k < 220; k++) b.add([line(k)]);
+    expect(b.lines.length).toBeLessThanOrEqual(150);
+    expect(b.lines.length).toBeGreaterThanOrEqual(140);
+    expect(b.lines[0].pos).toBeGreaterThan(40);
+    expect(b.lines[b.lines.length - 1].text).toBe("l219");
+    expect(b.counts[0]).toBe(b.lines.length);
+    expect(b.dropped + b.lines.length).toBe(220);
+    // Not held any more: back within the budget at the next drop.
+    b.hold = () => null;
+    b.add([line(220)]);
+    expect(b.lines.length).toBe(90);
+  });
+
+  it("has no room left just before it would drop what is held", () => {
+    const b = new LogBuffer(1e9, 100);
+    b.hold = () => 0;
+    for (let k = 0; k < 140; k++) b.add([[0, 1000 + k, `l${k}`]]);
+    expect(b.dropped).toBe(0);
+    expect(b.room()).toBe(true);
+    for (let k = 140; k < 146; k++) b.add([[0, 1000 + k, `l${k}`]]);
+    expect(b.room()).toBe(false);
+    expect(b.dropped).toBe(0);
+  });
+
   it("keeps a filtered view in step with merges and drops, matching lower-cased plain text", () => {
     const b = new LogBuffer(1e9, 20);
     b.add([

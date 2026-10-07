@@ -43,10 +43,10 @@ const CLASS: Record<string, string> = { time: "t-time", err: "t-err", warn: "t-w
 /** Longer lines are coloured up to here; the rest is plain. */
 const MAX = 4000;
 
-/** `text` in coloured pieces. */
-export function tokenize(text: string): Piece[] {
+/** `text` in coloured pieces — up to `upTo` characters (as far as it is drawn); the rest is one plain piece. */
+export function tokenize(text: string, upTo = MAX): Piece[] {
   const out: Piece[] = [];
-  const end = Math.min(text.length, MAX);
+  const end = Math.min(text.length, MAX, upTo);
   const scan = end < text.length ? text.slice(0, end) : text;
   let last = 0;
   TOKEN.lastIndex = 0;
@@ -70,6 +70,20 @@ export function tokenize(text: string): Piece[] {
     last = m.index + m[0].length;
   }
   if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
+}
+
+/** The pieces' text from offset `from` to `to` (in their joined text): pieces cut where the range ends inside them. */
+export function slicePieces(pieces: readonly Piece[], from: number, to: number): Piece[] {
+  const out: Piece[] = [];
+  if (from >= to) return out;
+  let pos = 0;
+  for (const p of pieces) {
+    if (pos >= to) break;
+    const end = pos + p.text.length;
+    if (end > from) out.push(pos >= from && end <= to ? p : { ...p, text: p.text.slice(Math.max(0, from - pos), Math.min(p.text.length, to - pos)) });
+    pos = end;
+  }
   return out;
 }
 

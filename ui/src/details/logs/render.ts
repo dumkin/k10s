@@ -46,15 +46,15 @@ function ansiPieces(text: string): Piece[] {
   }));
 }
 
-/** One line of text (a head as written, or a continuation line). */
-export function textPieces(text: string, ansi: boolean, pretty: boolean, hl?: Highlight): Piece[] {
+/** One line of text (a head as written, or a continuation line), coloured up to `upTo` characters. */
+export function textPieces(text: string, ansi: boolean, pretty: boolean, hl?: Highlight, upTo?: number): Piece[] {
   if (ansi) return marked(ansiPieces(text), hl);
-  return marked(pretty ? tokenize(text) : [{ text }], hl);
+  return marked(pretty ? tokenize(text, upTo) : [{ text }], hl);
 }
 
-/** The first line of an entry. `pinned`: fields shown as columns. */
-export function headOf(l: Line, s: Structured | null, pretty: boolean, pinned: readonly string[], hl?: Highlight): Head {
-  if (!pretty || !s || l.ansi) return { pieces: textPieces(l.text, l.ansi, pretty, hl) };
+/** The first line of an entry, coloured up to `upTo` characters. `pinned`: fields shown as columns. */
+export function headOf(l: Line, s: Structured | null, pretty: boolean, pinned: readonly string[], hl?: Highlight, upTo?: number): Head {
+  if (!pretty || !s || l.ansi) return { pieces: textPieces(l.text, l.ansi, pretty, hl, upTo) };
   const head: Head = { pieces: [] };
   if (s.levelKey !== undefined && l.lvl) head.tag = l.lvl;
   const skip = new Set<string>();
@@ -69,7 +69,7 @@ export function headOf(l: Line, s: Structured | null, pretty: boolean, pinned: r
     });
   }
   const pieces: Piece[] = [];
-  if (s.msg !== undefined) for (const p of tokenize(s.msg.includes("\n") ? s.msg.replace(/\r?\n/g, " ⏎ ") : s.msg)) pieces.push(p.cls ? p : { text: p.text, cls: "f-msg" });
+  if (s.msg !== undefined) for (const p of tokenize(s.msg.includes("\n") ? s.msg.replace(/\r?\n/g, " ⏎ ") : s.msg, upTo)) pieces.push(p.cls ? p : { text: p.text, cls: "f-msg" });
   for (const [k, v] of s.fields) {
     if (skip.has(k)) continue;
     pieces.push({ text: pieces.length ? "  " : "" }, { text: k, cls: "f-key" }, { text: "=", cls: "f-eq" }, { text: valueText(v), cls: valueClass(k, v), field: k, value: v });

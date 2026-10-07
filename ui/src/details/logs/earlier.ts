@@ -88,6 +88,8 @@ export interface EarlierOptions {
   label: string;
   /** Something changed (`state()` may say something else). */
   onChange: () => void;
+  /** Earlier lines are about to go into the buffer (the screen holds on to what it shows). */
+  beforeLoad?: () => void;
   /** Earlier lines went into the buffer. */
   onLoaded: () => void;
   now?: () => number;
@@ -365,6 +367,7 @@ export class Earlier {
       if (r.end?.message || got < share) this.cross(i, t);
     }
     if (batch.length || markers.length) {
+      this.o.beforeLoad?.();
       this.o.buffer.addEarlier(batch, markers);
       this.o.onLoaded();
     }

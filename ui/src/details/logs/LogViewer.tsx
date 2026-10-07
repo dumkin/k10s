@@ -14,7 +14,7 @@ import { keyOf } from "../../lib/keymap";
 import { shortName } from "../../state/clusters";
 import { onControl } from "../../state/keyboard";
 import { toast } from "../../state/ui";
-import { indexAtPos, type Line, LogBuffer, MAX_BYTES, MAX_LINES, pickPods, type PodRef, podKeyOf, type Source, Sources } from "../logBuffer";
+import { HOLD_OVER, indexAtPos, type Line, LogBuffer, MAX_BYTES, MAX_LINES, pickPods, type PodRef, podKeyOf, type Source, Sources } from "../logBuffer";
 import { Earlier, type EarlierState } from "./earlier";
 import { LogFields, LogSources } from "./LogPopovers";
 import { LogLines, type LinesHandle } from "./LogLines";
@@ -58,8 +58,20 @@ import type { Highlight } from "./render";
 export const MAX_TARGETS = 50;
 /** A log this big is filtered once typing pauses, not on every key. */
 const BIG_LOG = 30_000;
-/** Lines that keep coming are shown at most every `showEvery` ms; the first after a pause at once. (Tests: 0.) */
-export const timing = { showEvery: 100 };
+/** The newest lines coming this long after they were written: the view says how far behind it is. */
+const BEHIND_MS = 5000;
+/**
+ * Lines that keep coming are shown at most every `showEvery` ms (the first after a quiet spell at once), and further
+ * apart the more the last showing cost, up to `maxEvery`; while the user scrolls the lines read, they wait for the
+ * gesture to end, `hold` ms at most. (Tests: 0.)
+ */
+export const timing = { showEvery: 100, maxEvery: 1000, hold: 1000 };
+/** A log not on screen (a dock tab not shown) takes in its lines once a second. */
+const HIDDEN_EVERY = 1000;
+/** A press in the lines (text being selected) holds new lines this long at most… */
+const PRESS_HOLD_MS = 10_000;
+/** …or until this much text waits. */
+const HOLD_BYTES = 16 * 1024 * 1024;
 /** What a view's buffer holds at most. (Tests: less.) */
 export const budget = { bytes: MAX_BYTES, lines: MAX_LINES };
 
@@ -182,6 +194,12 @@ export interface LogCtx {
   loadEarlier: () => void;
   /** Live lines per second (the last 10 s), null when none come. */
   rate: Accessor<number | null>;
+  /** How long after they were written the newest lines came (ms), when that is long enough to tell; else null. */
+  behind: Accessor<number | null>;
+  /** Lines held back may come in now (the pointer was released, the view is on screen again). */
+  flush: () => void;
+  /** Whether the line was just expanded by the user (once: it is then scrolled into view). */
+  takeOpened: (l: Line) => boolean;
   setView: (v: "lines" | "patterns") => void;
   /** Tall enough for the histogram. */
   roomy: Accessor<boolean>;
@@ -233,18 +251,26 @@ export function LogViewer(props: LogViewerProps) {
   const newBuffer = () => {
     const b = new LogBuffer(budget.bytes, budget.lines);
     b.keep = () => untrack(() => filters().keep);
+    // The lines being read (or paused on) are not dropped from under the screen (see `LogBuffer.hold`).
+    // (The patterns shown instead of the lines: a pause holds what the buffer has.)
+    b.hold = () => (lines ? lines.holdPos() : untrack(pausedAt) !== null ? b.dropped : null);
     return b;
   };
   let buffer = newBuffer();
   let sources = new Sources();
-  /** Live lines as they arrived: [when, how many]; the last 10 s of them make the rate. */
-  const arrivals: [number, number][] = [];
+  /** Live lines as they arrived: [when, how many, how late the newest of them was]; the last 10 s make the rate. */
+  const arrivals: [number, number, number][] = [];
   const [rate, setRate] = createSignal<number | null>(null);
+  const [behind, setBehind] = createSignal<number | null>(null);
   const meter = setInterval(() => {
-    const from = Date.now() - 10_000;
-    while (arrivals.length && arrivals[0][0] < from) arrivals.shift();
+    const now = Date.now();
+    while (arrivals.length && arrivals[0][0] < now - 10_000) arrivals.shift();
     const n = arrivals.reduce((sum, [, k]) => sum + k, 0);
     setRate(n ? n / 10 : null);
+    // The freshest line of the last few seconds: a log that is shown late says so (its rate alone would not).
+    let late = Infinity;
+    for (const [at, , lag] of arrivals) if (at >= now - 3000) late = Math.min(late, lag);
+    setBehind(late >= BEHIND_MS && late < Infinity ? late : null);
   }, 1000);
   onCleanup(() => clearInterval(meter));
   let patternIds = new PatternIds();
@@ -253,6 +279,9 @@ export function LogViewer(props: LogViewerProps) {
   const [states, setStates] = createStore<Record<number, SourceState>>({});
   /** This stream's earlier history (see `Earlier`); `earlierTick` says it changed. */
   let earlier: Earlier | undefined;
+  /** The stream's: lines held back go in; markers for lines not kept while paused. */
+  let flush = () => {};
+  let resumed = () => {};
   const [earlierTick, setEarlierTick] = createSignal(0);
 
   // Pods × containers, at most MAX_TARGETS containers; pods already streamed stay chosen.
@@ -313,6 +342,7 @@ export function LogViewer(props: LogViewerProps) {
         restarts: restartsOf,
         label: logSpec.label ?? "",
         onChange: () => setEarlierTick((n) => n + 1),
+        beforeLoad: () => lines?.sync(),
         onLoaded: () => {
           // (An entry a stack trace's beginning joined has another head: its parsed fields are not its own.)
           structures.clear();
@@ -322,21 +352,92 @@ export function LogViewer(props: LogViewerProps) {
       onCleanup(() => early.close());
       // Lines are drawn at most every `timing.showEvery` ms, not on every batch that comes (the engine sends a log that
       // writes often every 50 ms, a busy one every 250): the same lines for half the drawing, and a log that writes now
-      // and then shows each of its lines at once. Batches wait outside the buffer meanwhile: what the buffer holds is
-      // always what is drawn (lines added under a screen drawn without them would look like a scroll away from them).
+      // and then shows each of its lines at once. Showing them costs what drawing them does: the more it cost, the
+      // longer until the next time — a flood of huge lines cannot keep the main thread busy, and scrolling stays
+      // smooth. Batches wait outside the buffer meanwhile: what the buffer holds is always what is drawn (lines added
+      // under a screen drawn without them would look like a scroll away from them). While the user scrolls what they
+      // read, or selects text, lines wait for them to stop: nothing moves under a gesture.
       let waiting: LogLine[][] = [];
-      let shownAt = -Infinity;
+      let waitingBytes = 0;
+      let firstWaitAt = 0;
+      let doneAt = -Infinity;
+      let cost = 0;
       let showTimer: ReturnType<typeof setTimeout> | undefined;
+      /** Lines not taken in while paused (the buffer full), per source, and the time of the first: a marker on resume. */
+      const skipped = new Map<number, { n: number; from: number }>();
+      const every = () => (timing.showEvery ? Math.min(timing.maxEvery, Math.max(timing.showEvery, cost * 2, lines?.shown() === false ? HIDDEN_EVERY : 0)) : 0);
+      /** Changes the lines (the screen holds on to what it shows), timed. */
+      const commit = (change: () => void) => {
+        lines?.sync();
+        const t0 = performance.now();
+        change();
+        setVersion((v) => v + 1);
+        doneAt = performance.now();
+        cost = Math.max(doneAt - t0, cost * 0.75);
+      };
+      const take = (batch: LogLine[]) => {
+        // Paused with the buffer full: the lines shown stay, those that come are counted, not kept.
+        if (pausedAt() === null || buf.room()) return buf.add(batch);
+        for (const [i, ts] of batch) {
+          const gap = skipped.get(i);
+          if (gap) gap.n++;
+          else skipped.set(i, { n: 1, from: ts ?? Date.now() });
+        }
+      };
       const show = () => {
         clearTimeout(showTimer);
         showTimer = undefined;
         if (!waiting.length) return;
-        shownAt = performance.now();
-        for (const lines of waiting) buf.add(lines);
+        const all = waiting;
         waiting = [];
-        setVersion((v) => v + 1);
+        waitingBytes = 0;
+        firstWaitAt = 0;
+        commit(() => {
+          for (const b of all) take(b);
+        });
       };
-      onCleanup(() => clearTimeout(showTimer));
+      const schedule = () => {
+        if (!waiting.length) return;
+        if (showTimer !== undefined) {
+          // (Held back, more than enough text waits: it goes in at the usual pace.)
+          if (waitingBytes < HOLD_BYTES) return;
+          clearTimeout(showTimer);
+          showTimer = undefined;
+        }
+        const now = performance.now();
+        firstWaitAt ||= now;
+        let at = doneAt + every();
+        const busy = timing.hold ? (lines?.busyUntil() ?? 0) : 0;
+        if (busy > now && waitingBytes < HOLD_BYTES) at = Math.max(at, Math.min(busy, firstWaitAt + (busy === Infinity ? PRESS_HOLD_MS : timing.hold)));
+        if (at <= now) show();
+        else
+          showTimer = setTimeout(() => {
+            showTimer = undefined;
+            schedule();
+          }, at - now);
+      };
+      flush = () => {
+        clearTimeout(showTimer);
+        showTimer = undefined;
+        schedule();
+      };
+      resumed = () => {
+        if (!skipped.size) return;
+        const room = buf.lines.length + buf.kept.length >= buf.maxLines * (HOLD_OVER - 0.05) ? `${count(Math.round(buf.maxLines * HOLD_OVER))} lines` : `${Math.round((buf.maxBytes * HOLD_OVER) / 1024 / 1024)} MB`;
+        // Each where its gap began: after the last line kept of its source, before those that came since.
+        commit(() => {
+          for (const [i, gap] of skipped) buf.mark(i, `${count(gap.n)} lines not kept while paused (a paused view keeps up to ${room})`, 4, gap.from);
+        });
+        skipped.clear();
+      };
+      onCleanup(() => {
+        clearTimeout(showTimer);
+        flush = () => {};
+        resumed = () => {};
+      });
+      const started = Date.now();
+      /** How late lines came at the least (a node's clock behind this one's is no lag): what late is measured from. */
+      let floor = Infinity;
       const sub = backend().streamLogs(logSpec, (m) => {
         if (m.t === "state") {
           // A late message of a target that was stopped: its source keeps why ("pod deleted").
@@ -348,23 +449,25 @@ export function LogViewer(props: LogViewerProps) {
           setStates(m.i, { state: m.state, message: m.message });
           const restarted = m.state === "streaming" && (before === "waiting" || before === "ended");
           early.streamState(m.i, m.state, restarted && wrote.has(m.i));
-          if ((m.message && m.state !== "reconnecting") || restarted) {
-            buf.mark(m.i, restarted ? (wrote.has(m.i) ? "running again" : "started") : m.message!, markerLevel(m.state, m.message ?? ""));
-            setVersion((v) => v + 1);
-          }
+          if ((m.message && m.state !== "reconnecting") || restarted) commit(() => buf.mark(m.i, restarted ? (wrote.has(m.i) ? "running again" : "started") : m.message!, markerLevel(m.state, m.message ?? "")));
           return;
         }
         for (const l of m.l) wrote.add(l[0]);
         waiting.push(m.l);
         early.seen(m.l);
-        // Live lines (written in the last half minute): what the rate counts.
-        const recent = Date.now() - 30_000;
+        // Live lines (not the history read first): what the rate counts, and how late the newest of them came.
+        const now = Date.now();
+        let newest = -Infinity;
+        for (const l of m.l) {
+          waitingBytes += l[2].length;
+          if (l[1] !== null && l[1] > newest) newest = l[1];
+        }
+        if (newest > -Infinity) floor = Math.min(floor, now - newest);
+        const from = started - 2000 - Math.max(0, floor);
         let live = 0;
-        for (const l of m.l) if (l[1] === null || l[1] >= recent) live++;
-        if (live) arrivals.push([Date.now(), live]);
-        const wait = shownAt + timing.showEvery - performance.now();
-        if (wait <= 0) show();
-        else showTimer ??= setTimeout(show, wait);
+        for (const l of m.l) if (l[1] === null || l[1] >= from) live++;
+        if (live) arrivals.push([now, live, newest > -Infinity ? Math.max(0, now - newest - floor) : 0]);
+        schedule();
       });
       onCleanup(() => sub.close());
       // Pods come and go (rollout, scale, eviction): only their streams start and stop, and the lines of pods that
@@ -497,6 +600,8 @@ export function LogViewer(props: LogViewerProps) {
 
   // ------------------------------------------------------------------ the cursor, expansion, folding
   let lines: LinesHandle | undefined;
+  /** The line the user expanded last, until its details are drawn (they scroll themselves into view then). */
+  let opened: Line | null = null;
   // A line picked is being read: new lines no longer move it off screen.
   const select = (l: Line | null, reveal = false) => {
     batch(() => {
@@ -572,17 +677,17 @@ export function LogViewer(props: LogViewerProps) {
   };
   /** The first line (the cursor too, if there is one): earlier lines are read when there are more. */
   const toFirst = () => {
-    const el = lines?.scroller();
-    if (!el) return;
-    setFollow(false);
-    lines!.byUser();
-    el.scrollTop = 0;
+    if (!lines) return;
+    lines.toTop();
     const first = shown()[0];
     if (selected() && first) select(first);
   };
   const toggle = (set: Accessor<ReadonlySet<Line>>, put: (s: ReadonlySet<Line>) => void) => (l: Line) => {
     const next = new Set(set());
-    if (!next.delete(l)) next.add(l);
+    if (!next.delete(l)) {
+      next.add(l);
+      if (set === expanded) opened = l;
+    }
     batch(() => {
       // Opening a line selects it and keeps it where it is.
       if (selected() !== l) setSelected(l);
@@ -658,7 +763,12 @@ export function LogViewer(props: LogViewerProps) {
       setPausedAt(on ? buffer.seq - 1 : null);
       if (!on) setFollow(true);
     });
-    if (!on) lines?.toBottom();
+    // Paused, the screen holds on to what it shows (it no longer follows the lines that come).
+    if (on) lines?.anchorHere();
+    if (!on) {
+      resumed();
+      lines?.toBottom();
+    }
   };
   onMount(() => {
     const keys: Binding[] = [
@@ -818,6 +928,13 @@ export function LogViewer(props: LogViewerProps) {
     earlier: earlierState,
     loadEarlier: () => earlier?.load(),
     rate: () => (pausedAt() === null ? rate() : null),
+    behind: () => (pausedAt() === null ? behind() : null),
+    flush: () => flush(),
+    takeOpened: (l) => {
+      if (opened !== l) return false;
+      opened = null;
+      return true;
+    },
     setView,
     roomy,
   };

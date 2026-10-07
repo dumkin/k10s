@@ -51,21 +51,36 @@ export function togglePinned(key: string) {
   setPinned(pinned().includes(key) ? pinned().filter((k) => k !== key) : [...pinned(), key]);
 }
 
-/** Parsed structured lines, the most recent few thousand (parsing again is cheaper than keeping them all). */
+/** Text of the structured lines kept parsed at most. */
+const PARSED_CHARS = 16_000_000;
+
+/**
+ * Parsed structured lines, the most recent few thousand, and no more text than `maxChars` of them (parsing again is
+ * cheaper than keeping them all: a few thousand lines of kilobytes each would keep their parsed fields in memory long
+ * after the buffer dropped them).
+ */
 export class Structures {
-  private map = new Map<Line, Structured | null>();
-  constructor(private readonly max = 20_000) {}
+  /** Each line's parse, and how much text it was parsed from. */
+  private map = new Map<Line, [Structured | null, number]>();
+  private chars = 0;
+  constructor(
+    private readonly max = 20_000,
+    private readonly maxChars = PARSED_CHARS,
+  ) {}
 
   get(l: Line): Structured | null {
     const hit = this.map.get(l);
-    if (hit !== undefined) return hit;
+    if (hit !== undefined) return hit[0];
     const s = l.marker ? null : structure(l.ansi ? stripAnsi(l.text) : l.text);
-    this.map.set(l, s);
-    if (this.map.size > this.max) {
-      let n = this.max / 10;
-      for (const k of this.map.keys()) {
+    this.map.set(l, [s, l.text.length]);
+    this.chars += l.text.length;
+    if (this.map.size > this.max || this.chars > this.maxChars) {
+      // The oldest go, a tenth at a time.
+      let n = Math.max(1, Math.floor(this.map.size / 10));
+      for (const [k, [, len]] of this.map) {
         this.map.delete(k);
-        if (--n <= 0) break;
+        this.chars -= len;
+        if (--n <= 0 && this.map.size <= this.max && this.chars <= this.maxChars) break;
       }
     }
     return s;
@@ -73,6 +88,7 @@ export class Structures {
 
   clear() {
     this.map.clear();
+    this.chars = 0;
   }
 }
 
@@ -89,12 +105,14 @@ export interface FieldStat {
 
 /**
  * The fields of the latest `sample` structured lines of `lines` (their time aside): how many lines have each, its
- * values. Most common first.
+ * values. Most common first. No more of them than half the text kept parsed: counted again, they are not parsed again.
  */
 export function fieldStats(lines: readonly Line[], structures: Structures, sample = 3000, maxValues = 200): { structured: number; fields: FieldStat[] } {
   const fields = new Map<string, FieldStat>();
   let structured = 0;
-  for (let k = lines.length - 1, n = 0; k >= 0 && n < sample; k--, n++) {
+  let chars = 0;
+  for (let k = lines.length - 1, n = 0; k >= 0 && n < sample && chars < PARSED_CHARS / 2; k--, n++) {
+    chars += lines[k].text.length;
     const s = structures.get(lines[k]);
     if (!s) continue;
     structured++;

@@ -1364,9 +1364,15 @@ textarea::placeholder {
 .tone-warn { color: var(--warn); }
 
 /* Lines. A row: the expand button, time, source, level tag, pinned columns, text. */
-.logs { tab-size: 4; -moz-tab-size: 4; }
+/* The view anchors what it shows itself (see LogLines). The rows are as wide as the content, whose width comes from
+   the lines (it never shrinks under the screen): a row drawn wider than that is cut, it does not widen the box. */
+.logs { tab-size: 4; -moz-tab-size: 4; overflow-anchor: none; }
+.logs .lines { right: 0; }
 .logs .ln { height: auto; min-height: 18px; position: relative; padding-left: 4px; box-shadow: inset 2px 0 0 var(--stripe, transparent); }
 .logs.nowrap .ln { height: 18px; }
+@supports (overflow: clip) {
+  .logs.nowrap .ln { overflow-x: clip; }
+}
 .logs.wrap .txt { white-space: pre-wrap; word-break: break-all; }
 .logs .ln-x {
   flex: none;
@@ -1417,7 +1423,7 @@ textarea::placeholder {
 .logs .ln.gap::before {
   content: attr(data-gap);
   position: absolute;
-  right: 12px;
+  left: var(--text-x, 12px);
   top: -6px;
   padding: 0 6px;
   font: 9.5px/12px var(--font-ui);
@@ -1506,6 +1512,7 @@ textarea::placeholder {
 .ld-field:hover > .ld-acts { opacity: 1; }
 .ld-text { margin: 0; font: 11.5px/18px var(--font-mono); white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; user-select: text; -webkit-user-select: text; }
 .ld-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.ld-more { margin-left: 6px; font-family: var(--font-ui); font-size: var(--fs-xs); white-space: nowrap; }
 
 /* Patterns. */
 .lpat { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }

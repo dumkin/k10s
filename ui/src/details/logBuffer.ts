@@ -9,6 +9,8 @@ export const MAX_BYTES = 64 * 1024 * 1024;
 const LINE_OVERHEAD = 64;
 /** An entry takes at most this many continuation lines; more start an entry of their own. */
 export const MAX_MORE = 400;
+/** A buffer whose lines are being read may grow to this many times its budget before those lines are dropped too. */
+export const HOLD_OVER = 1.5;
 
 /**
  * An entry of the log: a line as the container wrote it, with the lines that continue it (a stack trace) — or a
@@ -150,6 +152,11 @@ export class LogBuffer {
   keptBytes = 0;
   /** What the view shows now (null: everything): entries it lets through are kept when the buffer is full. */
   keep: (() => Filter | null) | null = null;
+  /**
+   * The first position the view draws while it is read or paused (null: it follows the lines that come): entries
+   * from it on are not dropped until the buffer holds `HOLD_OVER` times its budget, and then only as few as it takes.
+   */
+  hold: (() => number | null) | null = null;
   /** Lines and markers that arrived so far (`Line.seq` counts them). */
   seq = 0;
   /** Entries in the buffer per source. */
@@ -339,15 +346,26 @@ export class LogBuffer {
     for (const v of this.views.values()) v.stale = Math.min(v.stale, pos);
   }
 
+  /** Whether there is room for more lines (the buffer, held, is not about to drop what is read). */
+  room(): boolean {
+    return this.bytes + this.keptBytes < this.maxBytes * (HOLD_OVER - 0.05) && this.lines.length + this.kept.length < this.maxLines * (HOLD_OVER - 0.05);
+  }
+
   private evict() {
     const lines = this.lines;
     const kept = this.kept;
     if (this.bytes + this.keptBytes <= this.maxBytes && lines.length + kept.length <= this.maxLines) return;
+    // Lines being read stay, up to HOLD_OVER times the budget; beyond it, as few go as it takes (the oldest first).
+    const held = this.hold?.() ?? null;
+    const over = this.bytes + this.keptBytes > this.maxBytes * HOLD_OVER || lines.length + kept.length > this.maxLines * HOLD_OVER;
+    if (held !== null && !over && (lines[0]?.pos ?? Infinity) >= held) return;
+    const limit = held !== null && !over ? held : Infinity;
     // Down to 90%, so dropping (which moves the whole array) happens rarely. What the filter shows is kept, half the
     // budget at most (with the lower-case copies made of it since): beyond it, the oldest kept go.
     const keep = this.keep?.() ?? null;
-    const bytes = this.maxBytes * 0.9;
-    const count = Math.floor(this.maxLines * 0.9);
+    const share = held !== null && over ? HOLD_OVER - 0.1 : 0.9;
+    const bytes = this.maxBytes * share;
+    const count = Math.floor(this.maxLines * share);
     let k = 0;
     let out = 0;
     const trim = () => {
@@ -359,7 +377,7 @@ export class LogBuffer {
       }
     };
     trim();
-    while (k < lines.length - 1 && (this.bytes + this.keptBytes > bytes || lines.length - k + kept.length - out > count)) {
+    while (k < lines.length - 1 && lines[k].pos < limit && (this.bytes + this.keptBytes > bytes || lines.length - k + kept.length - out > count)) {
       const l = lines[k++];
       // (The test may make its lower-case copy, which counts: its size after the test.)
       const shown = !!keep?.test(l);

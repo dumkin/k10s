@@ -101,6 +101,11 @@ export function LogStrip(props: { ctx: LogCtx }) {
           <Show when={rate()}>
             <span class="faint">· {rate()! >= 1 ? `${rate()! >= 100 ? Math.round(rate()!) : rate()!.toFixed(1)}/s` : `${Math.round(rate()! * 60)}/min`}</span>
           </Show>
+          <Show when={c.behind()}>
+            <span class="tone-warn" title="The newest lines come this long after they were written: the cluster, the network or the app cannot keep up with the log">
+              · {Math.round(c.behind()! / 1000)} s behind
+            </span>
+          </Show>
           <Show when={!c.single()}>
             <span class="faint">
               {" · "}

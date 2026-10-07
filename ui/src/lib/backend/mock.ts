@@ -1639,11 +1639,33 @@ function logRun(t: LogTarget, previous: boolean): [number, number] {
   return previous ? [start - 40 * 60_000, start - 5000] : [start, Date.now()];
 }
 
+const auditShare = (() => {
+  try {
+    return Math.min(1, Number(localStorage.getItem("k10s:mock.logAudit")) || 0);
+  } catch {
+    return 0;
+  }
+})();
 const iso = (ms: number) => new Date(ms).toISOString();
 const ms = () => Math.floor(rnd() * 320);
 
+/**
+ * An audit record as a chat server writes it next to its own log, with no level: a JSON object of who and where,
+ * whose event is JSON in a string, and the event itself — JSON with JSON in its strings, then pairs. Kilobytes each.
+ */
+function auditLines(t: LogTarget, ts: number): string[] {
+  const user = `${alnum(6)}_${alnum(5)}`;
+  const ip = `${10 + Math.floor(rnd() * 180)}.${Math.floor(rnd() * 250)}.${Math.floor(rnd() * 250)}.${Math.floor(rnd() * 250)}`;
+  const item = { id: alnum(26), room: alnum(26), thread: alnum(26), author: alnum(26), created: ts, edited: 0, removed: 0, text: Array.from({ length: 30 + Math.floor(rnd() * 600) }, () => alnum(3 + Math.floor(rnd() * 8))).join(" "), extra: { automated: "false", files: Array.from({ length: Math.floor(rnd() * 4) }, () => ({ id: alnum(26), name: `${alnum(10)}.png`, size: Math.floor(rnd() * 900000) })) } };
+  const event = { action: pick(["readItem", "readThread", "createItem", "listUsers", "markThreadRead", "listItemsSince"]), after: rnd() < 0.5 ? JSON.stringify(item) : '""', item_id: JSON.stringify(alnum(26)), before: rnd() < 0.3 ? JSON.stringify(item) : '""', user_agent: pick(["ExampleChat-iOS/2.4.0 (iPhone)", "ExampleChat-Desktop/2.4.0 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)", "Go-http-client/1.1"]) };
+  const who = { host: t.pod, stream: "audit", user, email: `${user}@example.com`, src_ip: ip, event: JSON.stringify(event), session_id: alnum(26), request_id: alnum(26), ts: ts / 1000 };
+  return [JSON.stringify(who), `${JSON.stringify(event)} src_ip=${ip} dest_ip=${ip} handler=/api/${pick(["users", "items", "rooms/members"])} trace_id=${hex(16)} span_id=${hex(16)} status=200`];
+}
+
 /** What a container writes (its kind of app decides the format): one line, or a few (a stack trace). */
 function logLines(t: LogTarget, ts: number): string[] {
+  // A load test of huge lines: `localStorage["k10s:mock.logAudit"]` of the lines (0…1) are audit records.
+  if (auditShare && rnd() < auditShare) return auditLines(t, ts);
   const c = t.container;
   const r = rnd();
   const path = pick(PATHS);

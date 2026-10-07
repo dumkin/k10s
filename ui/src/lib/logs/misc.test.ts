@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asJsonl, asRaw, asText, clockOf, gapOf, stampOf } from "./format";
-import { overlay, tokenize } from "./highlight";
+import { overlay, slicePieces, tokenize } from "./highlight";
 import { histogram, LEVEL_SLOTS, stepFor, stepLabel } from "./histogram";
 import { Level } from "./parse";
 import { PatternIds, patternOf, patternParts } from "./patterns";
@@ -110,5 +110,31 @@ describe("highlight", () => {
       { text: "ef" },
     ]);
     expect(overlay([{ text: "x" }], [])).toEqual([{ text: "x" }]);
+  });
+
+  it("slices pieces by offsets, keeping what each piece is", () => {
+    const pieces = [{ text: "abc", cls: "a" }, { text: "def", field: "k", value: "def" }, { text: "gh", mark: true }];
+    expect(slicePieces(pieces, 2, 7)).toEqual([
+      { text: "c", cls: "a" },
+      { text: "def", field: "k", value: "def" },
+      { text: "g", mark: true },
+    ]);
+    // Whole pieces are the same objects; nothing past the end, nothing before the start.
+    expect(slicePieces(pieces, 3, 6)[0]).toBe(pieces[1]);
+    expect(slicePieces(pieces, 0, 100).map((p) => p.text).join("")).toBe("abcdefgh");
+    expect(slicePieces(pieces, 8, 20)).toEqual([]);
+    expect(slicePieces(pieces, 4, 4)).toEqual([]);
+    // ANSI colours go with their text.
+    const style = { color: "red" };
+    expect(slicePieces([{ text: "abcdef", style }], 1, 3)).toEqual([{ text: "bc", style }]);
+  });
+
+  it("colours as far as the line is drawn, the rest plain", () => {
+    const text = `${'"a" 12 '.repeat(20)}tail`;
+    const some = tokenize(text, 14);
+    expect(some.map((p) => p.text).join("")).toBe(text);
+    expect(some.filter((p) => p.cls).length).toBe(4);
+    expect(some[some.length - 1]).toEqual({ text: text.slice(13) });
+    expect(tokenize(text).filter((p) => p.cls).length).toBe(40);
   });
 });
