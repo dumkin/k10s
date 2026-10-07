@@ -366,7 +366,7 @@ export function CompareTab(props: DetailProps) {
       <div class="cmp-sides">
         <span class="chip cmp-this" title={fullName(self())}>
           <span class="swatch" style={{ background: clusterColor(self().cluster) }} />
-          {label(self())}
+          <span class="ellipsis">{label(self())}</span>
         </span>
         <span class="faint">vs</span>
         <For each={withs()}>
