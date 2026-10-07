@@ -518,6 +518,23 @@ export interface Source extends LogTarget {
   gone?: string;
 }
 
+/** The suffix a pod's controller generated for its name (a ReplicaSet's, a DaemonSet's, a Job's): `q4wz9`. */
+const GENERATED = /-([a-z0-9]{5})$/;
+
+/** A pod as its lines are labelled: by the suffix generated for it (`…q4wz9`), else by its name. */
+export function podLabel(pod: string): string {
+  const m = GENERATED.exec(pod);
+  return m ? `…${m[1]}` : pod;
+}
+
+/**
+ * The end of a pod's name that tells it from its workload's other pods: the suffix generated for it (`-q4wz9`), a
+ * StatefulSet's ordinal (`-0`); empty for other names (named after their node, say), whose beginning tells more.
+ */
+export function podEnd(pod: string): string {
+  return (GENERATED.exec(pod) ?? /-\d+$/.exec(pod))?.[0] ?? "";
+}
+
 type PodKeyed = { cluster: string; namespace: string; uid?: string };
 const podKey = (cluster: string, namespace: string, pod: string, uid?: string) => `${cluster}\n${namespace}\n${pod}\n${uid ?? ""}`;
 const targetKey = (t: LogTarget) => `${podKey(t.cluster, t.namespace, t.pod, t.uid)}\n${t.container}`;

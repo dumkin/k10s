@@ -158,11 +158,6 @@ describe("LogsTab", () => {
         ["web-c", "last line 6m1s ago"],
       ]);
       expect(rows.map((r) => r.querySelector(".lsrc-state")!.classList.contains("tone-warn"))).toEqual([false, true, false]);
-      // A name too long is cut before its end, which stays (pods of a workload differ there).
-      expect([...rows[0].querySelector(".lsrc-pod")!.children].map((e) => [e.className, e.textContent])).toEqual([
-        ["ellipsis", "web"],
-        ["", "-a"],
-      ]);
     } finally {
       vi.useRealTimers();
     }

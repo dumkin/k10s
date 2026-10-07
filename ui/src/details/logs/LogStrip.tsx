@@ -7,7 +7,7 @@ import { histogram, type Histogram, histogramStep, LEVEL_SLOTS, stepLabel } from
 import { Level, LEVEL_NAME, LEVELS } from "../../lib/logs/parse";
 import { indexAtKey } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
-import { histogramOpen, setHistogramOpen, utc } from "./model";
+import { behindText, histogramOpen, setHistogramOpen, utc } from "./model";
 import { createPasses } from "./passes";
 
 const H = 46;
@@ -109,7 +109,7 @@ export function LogStrip(props: { ctx: LogCtx }) {
           </Show>
           <Show when={c.behind()}>
             <span class="tone-warn" title="The newest lines come this long after they were written: the cluster, the network or the app cannot keep up with the log">
-              · {Math.round(c.behind()! / 1000)} s behind
+              · {behindText(c.behind()!)}
             </span>
           </Show>
           <Show when={!c.single()}>

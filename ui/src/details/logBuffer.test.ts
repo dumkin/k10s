@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, LogTarget } from "../lib/backend";
 import { Level } from "../lib/logs/parse";
-import { ALL, type Filter, type Line, LogBuffer, pickPods, plainOf, podDone, type PodRef, Sources } from "./logBuffer";
+import { ALL, type Filter, type Line, LogBuffer, pickPods, plainOf, podDone, podEnd, podLabel, type PodRef, Sources } from "./logBuffer";
 
 const containing = (b: LogBuffer, q: string): Filter => (q ? { key: q, test: (l) => b.lower(l).includes(q) } : ALL);
 const texts = (b: LogBuffer, q = "") => b.view(containing(b, q)).map((l) => l.text);
@@ -516,6 +516,22 @@ describe("podDone", () => {
     for (const status of ["Completed", "Succeeded", "Evicted", "Terminating", "OutOfmemory", "DeadlineExceeded"]) expect(podDone(status), status).toBe(true);
     for (const status of ["Running", "CrashLoopBackOff", "Error", "OOMKilled", "Pending", "ContainerCreating", "Init:0/1"]) expect(podDone(status), status).toBe(false);
     expect(podDone("Running", true)).toBe(true);
+  });
+});
+
+describe("podLabel and podEnd", () => {
+  it("tell a pod from its workload's others by the end of its name, when that is what tells", () => {
+    // A ReplicaSet's, a DaemonSet's or a Job's pod: the suffix generated for it.
+    expect(podLabel("orders-api-v2-7c5d9f8b4d-q4wz9")).toBe("…q4wz9");
+    expect(podEnd("orders-api-v2-7c5d9f8b4d-q4wz9")).toBe("-q4wz9");
+    // A StatefulSet's: its ordinal (its name is short enough to label it).
+    expect(podLabel("postgres-12")).toBe("postgres-12");
+    expect(podEnd("postgres-12")).toBe("-12");
+    // Named after its node, or bare: its beginning tells more.
+    const node = "kube-apiserver-ip-10-0-12-34.eu-west-1.compute.internal";
+    expect(podLabel(node)).toBe(node);
+    expect(podEnd(node)).toBe("");
+    expect(podEnd("debug")).toBe("");
   });
 });
 

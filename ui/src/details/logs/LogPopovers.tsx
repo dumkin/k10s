@@ -4,25 +4,20 @@ import { Popover } from "../../components/Popover";
 import { count, humanDuration } from "../../lib/format";
 import { fieldTerm } from "../../lib/logs/query";
 import { shortName } from "../../state/clusters";
+import { podEnd } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
-import { type FieldStat, fieldStats, type Lag, numeric, pinned, quantile, togglePinned } from "./model";
+import { behindText, type FieldStat, fieldStats, type Lag, numeric, pinned, quantile, togglePinned } from "./model";
 import { valueText } from "./render";
 
 const STATE_WORDS: Record<string, string> = { streaming: "live", reconnecting: "reconnecting", waiting: "waiting", ended: "ended", error: "error" };
 
-/** The end of a pod's name, kept in sight when the name is cut: its own part (`-q4wz9`, a StatefulSet's `-0`). */
-function podTail(pod: string): string {
-  const k = pod.lastIndexOf("-");
-  return k > 0 && pod.length - k <= 12 ? pod.slice(k) : pod.slice(-8);
-}
-
-/** What a stream's lag says (see `Lags`), and why. */
+/** What a stream's lag says (see `Arrivals`), and why. */
 function lagWords(lag: Lag): { text: string; title: string; late: boolean } {
   if ("behind" in lag)
     return {
-      text: `${humanDuration(lag.behind / 1000)} behind`,
+      text: behindText(lag.behind),
       title:
-        "Its lines come this long after they were written: its stream is held up on the way (the node, the API server, a proxy), or its node's clock is behind. A full view drops the lines written first, of all pods: lines this late go first",
+        "Its lines come this long after they were written: its stream is held up on the way (the node, the API server, a proxy), or its node's clock is behind the others'. A full view drops the lines written first, of all pods: lines this late go first",
       late: true,
     };
   return { text: `last line ${humanDuration(lag.quiet / 1000)} ago`, title: "Nothing came from it for a while: its newest line was written this long ago. A container that keeps writing: its stream is held up", late: false };
@@ -75,6 +70,7 @@ export function LogSources(props: { ctx: LogCtx; anchor: HTMLElement; onClose: (
             // A stream that runs: how late its lines come, or how long it has been quiet.
             const lag = () => (!r.s.gone && r.state?.state === "streaming" && !r.state.message ? c.lag(r.s.id) : undefined);
             const words = () => (lag() ? lagWords(lag()!) : undefined);
+            const end = podEnd(r.s.pod);
             return (
               <div class="lsrc" classList={{ off: !visible(r.s.id), gone: !!r.s.gone }}>
                 <button class="btn sm ghost icon" title={visible(r.s.id) ? "Hide its lines" : "Show its lines"} onClick={() => toggle(r.s.id)}>
@@ -84,8 +80,8 @@ export function LogSources(props: { ctx: LogCtx; anchor: HTMLElement; onClose: (
                 <button class="lsrc-name" title={`Only ${r.s.pod} · ${r.s.container}\n${r.s.cluster} · ${r.s.namespace}`} onClick={() => c.setSolo(c.solo() === r.s.id ? null : r.s.id)}>
                   {/* Cut in the middle: pods of a workload differ at the end of their names. */}
                   <span class="lsrc-pod">
-                    <span class="ellipsis">{r.s.pod.slice(0, r.s.pod.length - podTail(r.s.pod).length)}</span>
-                    <span>{podTail(r.s.pod)}</span>
+                    <span class="ellipsis">{r.s.pod.slice(0, r.s.pod.length - end.length)}</span>
+                    <span>{end}</span>
                   </span>
                   <span class="faint">
                     {r.s.container}

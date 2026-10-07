@@ -1004,6 +1004,10 @@ export class MockBackend implements Backend {
     const down = new Map<number, number>();
     const started = Date.now();
     const send = (lines: LogLine[]) => lines.length && cb({ t: "lines", l: lines });
+    // A stream held up (or a node's clock behind): every third container's lines, its history too, come
+    // `localStorage["k10s:mock.logLag"]` ms after they were written.
+    const lag = Number(localStorage.getItem("k10s:mock.logLag")) || 0;
+    const late = (i: number) => (i % 3 === 1 ? lag : 0);
     // A read of earlier history (see `logRun`): each container's last `tailLines` lines, up to `until`.
     if (spec.targets.some((t) => t.until != null)) {
       const timer = setTimeout(
@@ -1066,11 +1070,11 @@ export class MockBackend implements Backend {
         for (let k = 0; k < tail * fresh.length; k++) {
           const [i, t] = fresh[k % fresh.length];
           if (spec.previous && !crashy(t)) continue;
-          const ts = Math.round(start + Math.floor(k / fresh.length) * step + (k % fresh.length));
+          const ts = Math.round(start + Math.floor(k / fresh.length) * step + (k % fresh.length)) - late(i);
           for (const text of logLines(t, ts)) lines.push([i, ts, text]);
         }
         send(lines);
-        if (spec.previous) for (const [i, t] of fresh) if (crashy(t)) send([[i, Date.now() - 1000, "fatal error: runtime: out of memory"]]);
+        if (spec.previous) for (const [i, t] of fresh) if (crashy(t)) send([[i, Date.now() - 1000 - late(i), "fatal error: runtime: out of memory"]]);
         if (!follow) for (const [i] of fresh) cb({ t: "state", i, state: "ended" });
       });
     };
@@ -1079,8 +1083,6 @@ export class MockBackend implements Backend {
     // batches as the engine sends them: every 50 ms, every 250 ms from 100 lines a second on.
     const rate = Number(localStorage.getItem("k10s:mock.logRate")) || 0;
     const every = !rate ? 400 : rate * spec.targets.length >= 100 ? 250 : 50;
-    // A stream held up: `localStorage["k10s:mock.logLag"]` ms after they were written, every third container's lines come.
-    const lag = Number(localStorage.getItem("k10s:mock.logLag")) || 0;
     const timer = setInterval(() => {
       if (closed || !follow || !live.size) return;
       const now = Date.now();
@@ -1089,14 +1091,15 @@ export class MockBackend implements Backend {
       const n = rate ? Math.round((rate * ids.length * every) / 1000) : Math.floor(rnd() * 4);
       for (let k = 0; k < n && ids.length; k++) {
         const i = ids[Math.floor(rnd() * ids.length)];
-        const ts = i % 3 === 1 ? now - lag : now;
+        const ts = now - late(i);
         for (const text of logLines(live.get(i)!, ts)) lines.push([i, ts, text]);
       }
       // Now and then a crashy container dies, waits and comes back.
       for (const i of ids) {
         const t = live.get(i)!;
         if (!crashy(t) || rnd() > every / 400 / 120 || now - started < 8000) continue;
-        lines.push([i, now, "fatal error: runtime: out of memory"], [i, now, ""], [i, now, "goroutine 1 [running]:"], [i, now, "runtime.throw({0x1b2f3a0, 0x16})"], [i, now, "\t/usr/local/go/src/runtime/panic.go:1047 +0x5d"]);
+        const died = now - late(i);
+        lines.push([i, died, "fatal error: runtime: out of memory"], [i, died, ""], [i, died, "goroutine 1 [running]:"], [i, died, "runtime.throw({0x1b2f3a0, 0x16})"], [i, died, "\t/usr/local/go/src/runtime/panic.go:1047 +0x5d"]);
         down.set(i, now + 9000);
         const message = "container terminated: OOMKilled (exit code 137)";
         setTimeout(() => !closed && cb({ t: "state", i, state: "ended", message }), 300);
@@ -1104,7 +1107,7 @@ export class MockBackend implements Backend {
         setTimeout(() => {
           if (closed || !live.has(i)) return;
           cb({ t: "state", i, state: "streaming" });
-          const at = Date.now();
+          const at = Date.now() - late(i);
           send([[i, at, `${"\x1b[32mINFO\x1b[0m"}  starting ${t.container} v1.42.0 (commit 3f2a9c1)`], [i, at + 3, "level=info msg=\"listening\" addr=:8080"]]);
         }, 9000);
       }
