@@ -136,7 +136,8 @@ function inTerminal(e: KeyboardEvent): boolean {
 /** A combo that types a character into a field: a key without ⌘, Ctrl or ⌥ (Shift makes another character). */
 const typesText = (combo: string) => /^(shift\+)?(.|space)$/u.test(combo);
 
-function isTyping(e: KeyboardEvent): boolean {
+/** The key went to a field (an input, a text area — a terminal's too — or editable text): it types there. */
+export function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   if (!t) return false;
   return t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT";

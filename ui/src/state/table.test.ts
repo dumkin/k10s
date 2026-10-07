@@ -4,7 +4,7 @@ import { Tone } from "../lib/backend";
 import { registerColumnKind } from "../registry/columns";
 import { setSelectedClustersRaw } from "./clusters";
 import { setFilter } from "./nav";
-import { createTableModel, hiddenClusters, isRowVisible, onlyClusterShown, previewColumnWidth, setColumnWidth, setHiddenClusters, soloCluster, sortRows, toggleClusterHidden, toggleSort } from "./table";
+import { cellText, createTableModel, hiddenClusters, isRowVisible, onlyClusterShown, previewColumnWidth, setColumnWidth, setHiddenClusters, soloCluster, sortRows, type TableColumn, toggleClusterHidden, toggleSort } from "./table";
 import type { UIRow, ViewFeed } from "./view";
 
 const row = (cl: string, n: string, ns = "payments"): UIRow => ({ key: `${cl}/${n}`, cl, u: n, n, ns, rv: "1", t: 0, s: Tone.Ok, c: [] });
@@ -34,6 +34,45 @@ describe("isRowVisible", () => {
     expect(hiddenClusters().has("z2")).toBe(true);
     expect(isRowVisible(a)).toBe(true);
     expect(isRowVisible(b)).toBe(false);
+  });
+});
+
+describe("cellText", () => {
+  const col = (c: Partial<TableColumn>): TableColumn => ({ id: "x", title: "X", kind: "text", width: 80, index: -1, ...c });
+  const at = (seconds: number) => () => seconds;
+
+  it("is what a cell shows, in full — a cluster's whole context name", () => {
+    const r: UIRow = { ...row("prod-eu-z1", "payments-api-7d9f6c5b4-x2kqp"), t: 1_000, c: [["Running", Tone.Ok], [2, 2], "10.244.1.23"] };
+    const now = at(1_000 + 3 * 86_400);
+    expect(cellText(col({ special: "name" }), r, now)).toBe("payments-api-7d9f6c5b4-x2kqp");
+    expect(cellText(col({ special: "namespace" }), r, now)).toBe("payments");
+    expect(cellText(col({ special: "namespace" }), { ...r, ns: undefined }, now)).toBe("");
+    expect(cellText(col({ special: "cluster" }), r, now)).toBe("prod-eu-z1");
+    expect(cellText(col({ special: "age", kind: "age" }), r, now)).toBe("3d");
+    expect(cellText(col({ special: "age", kind: "age" }), { ...r, t: 0 }, now)).toBe("");
+    expect(cellText(col({ kind: "status", index: 0 }), r, now)).toBe("Running");
+    expect(cellText(col({ kind: "ratio", index: 1 }), r, now)).toBe("2/2");
+    expect(cellText(col({ kind: "text", index: 2 }), r, now)).toBe("10.244.1.23");
+    // A cell the row doesn't have (a cluster that sent fewer columns): nothing.
+    expect(cellText(col({ kind: "text", index: 9 }), r, now)).toBe("");
+  });
+
+  it("is what a computed column computes, as its kind shows it", () => {
+    expect(cellText(col({ kind: "cpu", cell: () => 1_700 }), row("z1", "api"), at(0))).toBe("1.7");
+    expect(cellText(col({ kind: "usageCpu", cell: () => [33, 500] }), row("z1", "api"), at(0))).toBe("33m");
+  });
+
+  it("reads the clock only for text that follows it, as the table does", () => {
+    const clock = vi.fn(() => 5_000);
+    const r: UIRow = { ...row("z1", "api"), t: 1_000, c: ["10.0.0.1", [1_000, null]] };
+    for (const c of [col({ special: "name" }), col({ special: "namespace" }), col({ special: "cluster" }), col({ kind: "text", index: 0 })]) cellText(c, r, clock);
+    expect(clock).not.toHaveBeenCalled();
+    expect(cellText(col({ special: "age", kind: "age" }), r, clock)).toBe("66m");
+    expect(cellText(col({ kind: "duration", index: 1 }), r, clock)).toBe("66m");
+    expect(clock).toHaveBeenCalledTimes(2);
+    // A kind that isn't live gets no time, in the table and here alike: what is shown is what is copied.
+    registerColumnKind("test-clock", { text: (_, now) => String(now), sortKey: () => null });
+    expect(cellText(col({ kind: "test-clock", index: 0 }), r, clock)).toBe("0");
   });
 });
 

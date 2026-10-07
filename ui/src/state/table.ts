@@ -1,5 +1,6 @@
 import { type Accessor, createComputed, createMemo, createRoot, createSignal, onCleanup, untrack } from "solid-js";
 import type { Cell, Column } from "../lib/backend";
+import { age } from "../lib/format";
 import { isBoolean, isNumber, isObject, isString, persisted, recordOf } from "../lib/persist";
 import { globalMemo } from "../lib/reactive";
 import { columnKind, extraColumns } from "../registry/columns";
@@ -22,6 +23,31 @@ export interface TableColumn {
   flex?: boolean;
   /** A computed column's cell (see `ExtraColumn`): it reads other state (usage), not the row's cells. */
   cell?: (row: UIRow) => Cell;
+}
+
+/** A cell's value: what a computed column computes, else the row's own cell. */
+export function cellOf(col: TableColumn, row: UIRow): Cell {
+  return col.cell ? col.cell(row) : (row.c[col.index] ?? null);
+}
+
+/**
+ * A cell's text, in full (the table may cut it short): what the table shows (`CellView`) and what ⌥-click copies. A
+ * cluster's is its context's full name — the cell shows a short one. The clock is read only for text that follows it
+ * (ages, durations): a cell showing any other text doesn't change as it ticks.
+ */
+export function cellText(col: TableColumn, row: UIRow, now: () => number): string {
+  switch (col.special) {
+    case "name":
+      return row.n;
+    case "namespace":
+      return row.ns ?? "";
+    case "cluster":
+      return row.cl;
+    case "age":
+      return age(row.t, now());
+  }
+  const def = columnKind(col.kind);
+  return def.text(cellOf(col, row), def.live ? now() : 0);
 }
 
 export interface SortState {

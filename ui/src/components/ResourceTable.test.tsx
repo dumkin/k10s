@@ -10,12 +10,12 @@ vi.mock("../lib/backend", async (importOriginal) => ({
   backend: () => ({ connect: engine.connect, reconnect: engine.reconnect }),
 }));
 
-import { type ClusterInfo, Tone } from "../lib/backend";
+import { type ClusterInfo, type Column, Tone } from "../lib/backend";
 import { setClusterStatus, setContexts, setSelectedClustersRaw } from "../state/clusters";
-import { clearNamespaceMemory, namespaces, rememberedNamespaces, rememberNamespaces, setNamespaces } from "../state/nav";
-import { createTableModel, type TableModel } from "../state/table";
-import { setPickerOpen } from "../state/ui";
-import type { FeedState, ViewFeed } from "../state/view";
+import { clearMarks, clearNamespaceMemory, closeDetails, detailsOpen, marked, namespaces, rememberedNamespaces, rememberNamespaces, selectedKey, setNamespaces, setSelectedKey } from "../state/nav";
+import { cellText, createTableModel, type TableModel } from "../state/table";
+import { now, setPickerOpen, setToasts, toasts } from "../state/ui";
+import type { FeedState, UIRow, ViewFeed } from "../state/view";
 import { ResourceTable } from "./ResourceTable";
 
 beforeAll(() => {
@@ -34,10 +34,12 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function mount(notices: Record<string, string>, rows: ViewFeed["rows"] = () => [], statuses: Record<string, FeedState> = {}, loading: Accessor<boolean> = () => false): TableModel {
+const READY: Column = { id: "pc_ready_status", title: "Ready", kind: "status" };
+
+function mount(notices: Record<string, string>, rows: ViewFeed["rows"] = () => [], statuses: Record<string, FeedState> = {}, loading: Accessor<boolean> = () => false, columns: Column[] = [READY]): TableModel {
   let model!: TableModel;
   const feed: ViewFeed = {
-    columns: () => [{ id: "pc_ready_status", title: "Ready", kind: "status" }],
+    columns: () => columns,
     rows,
     statuses,
     resolved: {},
@@ -99,6 +101,161 @@ describe("ResourceTable", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("⌥-click on a cell", () => {
+  const rows: UIRow[] = [
+    { key: "z1/payments-api-7d9f6c5b4-x2kqp", cl: "prod-eu-z1", u: "a", n: "payments-api-7d9f6c5b4-x2kqp", ns: "payments", rv: "1", t: 0, s: Tone.Ok, c: [["Running", Tone.Ok]] },
+    { key: "z1/payments-worker", cl: "prod-eu-z1", u: "w", n: "payments-worker", ns: "payments", rv: "1", t: 0, s: Tone.Ok, c: [null] },
+  ];
+  // The clipboard's stand-in writes at once (inside the click), so what was copied is known right after it.
+  let copied: string[] = [];
+  const cell = (row: number, col: string) => document.querySelectorAll(".tr")[row].querySelector(`[data-col="${col}"]`)!;
+  /** Dispatches a mouse event; false when its default action was prevented. */
+  const mouse = (type: string, el: Element, init: MouseEventInit = {}) => el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }));
+  const key = (type: string, init: KeyboardEventInit, target: EventTarget = window) => target.dispatchEvent(new KeyboardEvent(type, { bubbles: true, ...init }));
+  const copyCells = () => document.querySelector(".table")!.classList.contains("copy-cells");
+
+  beforeEach(() => {
+    copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "clipboard");
+    setSelectedKey(null);
+    clearMarks();
+    closeDetails();
+    setToasts([]);
+  });
+
+  it("copies the cell's text and does nothing else: the selection, the marks, the focus and the details stay", async () => {
+    mount({}, () => rows);
+    expect(mouse("mousedown", cell(0, "pc_ready_status"), { altKey: true })).toBe(false);
+    expect(copied).toEqual(["Running"]);
+    await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied Ready", detail: "Running" }));
+    mouse("mousedown", cell(0, "name"), { altKey: true });
+    expect(copied).toEqual(["Running", "payments-api-7d9f6c5b4-x2kqp"]);
+    expect(selectedKey()).toBeNull();
+    expect(marked().size).toBe(0);
+    expect(detailsOpen()).toBe(false);
+  });
+
+  it("copies once on a double ⌥-click, which opens nothing; a press of the same run on another row's cell copies it", () => {
+    mount({}, () => rows);
+    mouse("mousedown", cell(0, "name"), { altKey: true, detail: 1 });
+    mouse("mousedown", cell(0, "name"), { altKey: true, detail: 2 });
+    mouse("dblclick", cell(0, "name"), { altKey: true, detail: 2 });
+    expect(copied).toEqual(["payments-api-7d9f6c5b4-x2kqp"]);
+    expect(detailsOpen()).toBe(false);
+    // The rows scrolled under a pointer that stayed put: the next press is the run's third, on another row.
+    mouse("mousedown", cell(1, "name"), { altKey: true, detail: 3 });
+    expect(copied).toEqual(["payments-api-7d9f6c5b4-x2kqp", "payments-worker"]);
+  });
+
+  it("goes by what the presses of a run of clicks did, not by the keys of its last one", () => {
+    mount({}, () => rows);
+    // A click, then a ⌥-click on the same spot, which WebKitGTK counts as the second of a double click: it copies…
+    mouse("mousedown", cell(0, "name"), { detail: 1 });
+    mouse("mousedown", cell(0, "name"), { altKey: true, detail: 2 });
+    mouse("dblclick", cell(0, "name"), { altKey: true, detail: 2 });
+    expect(copied).toEqual(["payments-api-7d9f6c5b4-x2kqp"]);
+    expect(detailsOpen()).toBe(false);
+    // …and a ⌥-click, then a click: the click selects, and no details open.
+    mouse("mousedown", cell(1, "name"), { altKey: true, detail: 1 });
+    mouse("mousedown", cell(1, "name"), { detail: 2 });
+    mouse("dblclick", cell(1, "name"), { detail: 2 });
+    expect(selectedKey()).toBe("z1/payments-worker");
+    expect(detailsOpen()).toBe(false);
+    // A double click without ⌥ still opens them.
+    mouse("mousedown", cell(0, "name"), { detail: 1 });
+    mouse("mousedown", cell(0, "name"), { detail: 2 });
+    mouse("dblclick", cell(0, "name"), { detail: 2 });
+    expect(detailsOpen()).toBe(true);
+  });
+
+  it("copies nothing where there is nothing to copy, which isn't shown as copyable, and is no plain click there either", () => {
+    mount({}, () => rows);
+    // An empty cell is a dash, of every kind.
+    expect(cell(1, "pc_ready_status").classList.contains("empty-cell")).toBe(true);
+    expect(cell(0, "pc_ready_status").classList.contains("empty-cell")).toBe(false);
+    expect(cell(0, "age").classList.contains("empty-cell")).toBe(true);
+    expect(mouse("mousedown", cell(1, "pc_ready_status"), { altKey: true })).toBe(false);
+    expect(mouse("mousedown", document.querySelectorAll(".tr")[1].querySelector(".c-status")!, { altKey: true })).toBe(false);
+    mouse("dblclick", cell(1, "pc_ready_status"), { altKey: true });
+    expect(copied).toEqual([]);
+    expect(toasts()).toEqual([]);
+    expect(selectedKey()).toBeNull();
+    expect(detailsOpen()).toBe(false);
+  });
+
+  it("leaves ⌥ with ⇧, ⌘ or Ctrl (AltGr too) to the clicks they are", () => {
+    mount({}, () => rows);
+    mouse("mousedown", cell(1, "name"), { altKey: true, metaKey: true });
+    expect(marked().has("z1/payments-worker")).toBe(true);
+    mouse("mousedown", cell(1, "name"), { altKey: true, ctrlKey: true });
+    expect(marked().has("z1/payments-worker")).toBe(false);
+    mouse("mousedown", cell(0, "name"), { altKey: true, shiftKey: true });
+    expect(selectedKey()).toBe("z1/payments-api-7d9f6c5b4-x2kqp");
+    expect(copied).toEqual([]);
+  });
+
+  it("shows at most 120 characters of what it copied, whole ones, and says when the clipboard refuses", async () => {
+    const long = `${"a".repeat(118)}🚀${"b".repeat(10)}`;
+    mount({}, () => [{ ...rows[0], key: "z1/long", n: long }]);
+    mouse("mousedown", cell(0, "name"), { altKey: true });
+    expect(copied).toEqual([long]);
+    await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied Name", detail: `${"a".repeat(118)}🚀…` }));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("Write permission denied.")) } });
+    mouse("mousedown", cell(0, "name"), { altKey: true });
+    await vi.waitFor(() => expect(toasts().at(-1)).toMatchObject({ kind: "error", title: "Could not copy" }));
+    expect(toasts().at(-1)?.detail).toContain("Write permission denied");
+  });
+
+  it("shows each cell's text, which is what ⌥-click copies", () => {
+    const ago = now() - 600;
+    const columns: Column[] = [READY, { id: "pc_restarts", title: "Restarts", kind: "restarts" }, { id: "pc_ip", title: "IP", kind: "text" }, { id: "pc_cpu", title: "CPU", kind: "cpu" }, { id: "pc_jobs", title: "Completions", kind: "ratio" }];
+    const row: UIRow = { ...rows[0], c: [["Running", Tone.Ok], [2, ago], "10.244.1.23", 1_700, [1, 2]] };
+    const model = mount({}, () => [row], {}, () => false, columns);
+    const cells = [...document.querySelectorAll<HTMLElement>(".tr .td[data-col]")];
+    expect(cells.map((el) => el.dataset.col)).toEqual(model.columns().map((c) => c.id));
+    for (const [i, c] of model.columns().entries()) {
+      expect(cells[i].textContent).toBe(cellText(c, row, now));
+      mouse("mousedown", cells[i], { altKey: true });
+    }
+    expect(copied).toEqual(["payments-api-7d9f6c5b4-x2kqp", "payments", "Running", "2 (10m ago)", "10.244.1.23", "1.7", "1/2"]);
+  });
+
+  it("shows that cells copy while ⌥ alone is held, not while it types", () => {
+    mount({}, () => rows);
+    key("keydown", { key: "Alt", altKey: true });
+    expect(copyCells()).toBe(true);
+    key("keyup", { key: "Alt" });
+    expect(copyCells()).toBe(false);
+    // With ⌘ it's another shortcut.
+    key("keydown", { key: "Alt", altKey: true, metaKey: true });
+    expect(copyCells()).toBe(false);
+    // ⌥ in a field (or a terminal) types — characters, on macOS.
+    const field = document.body.appendChild(document.createElement("input"));
+    key("keydown", { key: "Alt", altKey: true }, field);
+    expect(copyCells()).toBe(false);
+    // Leaving the window, or hiding it, no keyup comes.
+    key("keydown", { key: "Alt", altKey: true });
+    window.dispatchEvent(new Event("blur"));
+    expect(copyCells()).toBe(false);
+    key("keydown", { key: "Alt", altKey: true });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    try {
+      document.dispatchEvent(new Event("visibilitychange"));
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState");
+    }
+    expect(copyCells()).toBe(false);
+    // The mouse says so too: ⌥ went down while another window had the keyboard.
+    mouse("mousemove", cell(0, "name"), { altKey: true });
+    expect(copyCells()).toBe(true);
+    mouse("mousemove", cell(0, "name"));
+    expect(copyCells()).toBe(false);
   });
 });
 

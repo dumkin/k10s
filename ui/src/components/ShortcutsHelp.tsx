@@ -48,6 +48,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "space | mod+a", text: "Mark the row (and go down) / mark all shown" },
       { keys: "@table.mark-down @table.mark-up | shift+arrowdown shift+arrowup", text: "Mark the rows on the way (⇧-click too); going back unmarks them" },
       { keys: "shift+pagedown shift+pageup | shift+home shift+end", text: "Mark a page down / up, or up to the first / last row" },
+      { keys: "hold:alt", text: "Click a cell: copy its text (the cell a click would copy is highlighted)" },
       { keys: "@table.sort-name | @table.sort-age", text: "Sort by name / age; again: the other way" },
       { keys: "0 | 1 … 9", text: "All namespaces / a namespace on its number key" },
       { keys: "alt+1 … alt+9 | alt+0", text: `Hide or show a cluster's rows / show all (${comboLabel("mod")}-click its chip: only its rows)` },

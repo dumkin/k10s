@@ -225,12 +225,13 @@ k10s проверяет GitHub Releases при запуске и раз в ше�
 | `j` `k`, `/`, `↵` | перемещение, фильтр, детали |
 | `d` `r` `l` `e` `y` `=` | Overview, Relations, Logs, Events, YAML, Compare |
 | `Space` или `⇧J` `⇧K`, затем `l` или `=` | отметить строки, затем их общие логи или сравнение |
+| ⌥-клик | скопировать ячейку, например IP пода |
 | `s`, `a`, `⇧F` | shell, attach, port-forward |
 | `⇧R`, `⇧S`, `⌃D` | restart, scale, delete |
 | ⌘J | док с терминалами, port-forward и логами |
 | ⌘, | настройки |
 
-На Linux и Windows ⌘ — это Ctrl. Все клавиши: [docs/keyboard.md](docs/keyboard.md) (на английском).
+На Linux и Windows ⌘ — это Ctrl, а ⌥ — Alt. Все клавиши: [docs/keyboard.md](docs/keyboard.md) (на английском).
 
 ## Приватность
 

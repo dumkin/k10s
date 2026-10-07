@@ -862,8 +862,14 @@ textarea::placeholder {
 .tr.mark.sel { background: linear-gradient(var(--bg-selected), var(--bg-selected)), var(--bg-marked); }
 .tr.mark.sel::after { display: none; }
 .tr.terminating { opacity: 0.55; }
+/*
+ * A cell takes its row's whole height (less the border), its text centred by its line: a tooltip, or a ⌥-click (see
+ * `ResourceTable`), finds the cell wherever the pointer is in the row.
+ */
 .td {
+  align-self: stretch;
   padding: 0 10px;
+  line-height: calc(var(--row-h) - 1px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -885,6 +891,12 @@ textarea::placeholder {
 .td.st .dot { width: 6px; height: 6px; }
 .td .ns { color: var(--text-2); }
 .td.empty-cell::after { content: "—"; color: var(--text-3); opacity: 0.6; }
+/* ⌥ held: the cell under the pointer copies on click (see `ResourceTable`). Paint only: the cells keep their boxes. */
+.table.copy-cells .td[data-col]:not(.empty-cell):hover {
+  cursor: copy;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
 
 .table-empty {
   position: absolute;

@@ -32,6 +32,7 @@ On Linux and Windows, `⌘` is `Ctrl` (so `⌃D` is also `Ctrl+D`), `⌥` is `Al
 | `Space`, `⌘A` | mark a row / mark all visible rows |
 | `⇧J` `⇧K` (`⇧↓` `⇧↑`), `⇧`-click | mark the rows on the way from the selected one; going back unmarks them |
 | `⇧PgDn` `⇧PgUp`, `⇧Home` `⇧End` | mark a page down / up, or up to the first / last row |
+| `⌥`-click | copy the cell: all of its text (a cluster: its context's full name), and nothing else happens. While `⌥` is held, the cell a click would copy is highlighted. From the keyboard, `c` copies the names. Some Linux desktops move the window on `Alt`-click; their window manager's settings can change that key |
 | `⇧R`, `⇧S`, `⌃D` (`⌘⌫`), `c` | restart, scale, delete, copy the name (read-only mode explains why not) |
 | `s` / `a` | shell into a pod (on a node: a node shell) / attach to a container's process |
 | `⇧F` | port-forward a pod, service or workload |

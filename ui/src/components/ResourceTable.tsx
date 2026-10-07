@@ -1,5 +1,6 @@
 import { type Accessor, batch, createEffect, createMemo, createSignal, For, Index, Match, on, onCleanup, onMount, Show, type Signal, Switch, untrack } from "solid-js";
-import { age } from "../lib/format";
+import { errorMessage } from "../lib/backend";
+import { isTyping } from "../lib/hotkeys";
 import { errorTitle, isAuthFailure, isAuthFailureMessage, isError, isForbidden, isValidNamespace, normalizeNamespace } from "../lib/k8s";
 import { splitterDrag } from "../lib/splitter";
 import { columnKind } from "../registry/columns";
@@ -25,8 +26,8 @@ import {
   setSelectedKey,
   toggleMark,
 } from "../state/nav";
-import { previewColumnWidth, setColumnWidth, sort, type TableColumn, type TableModel, toggleSort } from "../state/table";
-import { dialog, now, paletteOpen, pickerOpen } from "../state/ui";
+import { cellOf, cellText, previewColumnWidth, setColumnWidth, sort, type TableColumn, type TableModel, toggleSort } from "../state/table";
+import { dialog, now, paletteOpen, pickerOpen, toast } from "../state/ui";
 import type { FeedState, UIRow, ViewFeed } from "../state/view";
 import { Icon } from "./Icon";
 
@@ -34,6 +35,18 @@ export const ROW_H = 28;
 const HEAD_H = 31;
 const OVERSCAN = 6;
 const DOT_COL = 26;
+/** Characters of copied text a toast shows (the clipboard gets all of it): labels and messages run to hundreds. */
+const SHOWN_COPY = 120;
+
+/** ⌥ alone, with no other modifier: a click on a cell copies it. With ⇧, ⌘ or Ctrl (AltGr too) it's another click. */
+const copies = (e: MouseEvent | KeyboardEvent) => e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+
+/** `text` cut to `max` characters, "…" last — whole characters: an emoji's two halves stay together. */
+function shortened(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const chars = Array.from(text);
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
+}
 
 export interface TableHandle {
   scrollToIndex(i: number): void;
@@ -50,6 +63,11 @@ export function ResourceTable(props: {
   let scroller!: HTMLDivElement;
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewport, setViewport] = createSignal(800);
+  /** ⌥ held (see `copies`): the cell under the pointer shows that a click copies it. */
+  const [copyHeld, setCopyHeld] = createSignal(false);
+  // ⌥ typed into a field or a terminal types (characters, on macOS): the table shows nothing for it.
+  const copyKey = (e: KeyboardEvent) => setCopyHeld(copies(e) && !isTyping(e));
+  const copyMove = (e: MouseEvent) => setCopyHeld(copies(e));
 
   const rows = props.model.sorted;
   const cols = props.model.columns;
@@ -74,6 +92,20 @@ export function ResourceTable(props: {
     ro.observe(scroller);
     onCleanup(() => ro.disconnect());
     props.ref?.({ scrollToIndex, pageSize: () => Math.max(1, Math.floor((scroller.clientHeight - HEAD_H) / ROW_H) - 1) });
+    // The keys say when ⌥ goes down and up, and so does the mouse over the rows (⌥ pressed while another window had
+    // the keyboard, a keyup that never came). Leaving the window (⌘-Tab), no keyup comes at all.
+    const release = () => setCopyHeld(false);
+    const onVisibility = () => document.visibilityState !== "visible" && release();
+    window.addEventListener("keydown", copyKey, { capture: true });
+    window.addEventListener("keyup", copyKey, { capture: true });
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", onVisibility);
+    onCleanup(() => {
+      window.removeEventListener("keydown", copyKey, { capture: true });
+      window.removeEventListener("keyup", copyKey, { capture: true });
+      window.removeEventListener("blur", release);
+      document.removeEventListener("visibilitychange", onVisibility);
+    });
   });
 
   // Keep the selected row visible when it changes (keyboard navigation, reveal, back…). A row that
@@ -107,10 +139,39 @@ export function ResourceTable(props: {
     return i === undefined ? undefined : rows()[i];
   };
 
+  /**
+   * The presses of one run of clicks (a double click is one; `detail` counts them): whether one of them was a ⌥-press —
+   * the run then opens no details — and which cell one copied (row key and column), not copied again by the next.
+   */
+  let run = { alt: false, copied: "" };
+
+  /** Copies the text of the cell `e` went to (all of it: the table may cut it short), unless this run just did. */
+  const copyCell = (e: MouseEvent, row: UIRow) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>("[data-col]")?.dataset.col;
+    const col = cols().find((c) => c.id === id);
+    const text = col ? cellText(col, row, now) : "";
+    const at = `${row.key}\0${id}`;
+    if (!col || !text || run.copied === at) return;
+    run.copied = at;
+    void navigator.clipboard.writeText(text).then(
+      () => toast("success", `Copied ${col.title}`, shortened(text, SHOWN_COPY)),
+      (err) => toast("error", "Could not copy", errorMessage(err)),
+    );
+  };
+
   const onMouseDown = (e: MouseEvent) => {
     const i = indexFromEvent(e);
     const row = i === undefined ? undefined : rows()[i];
     if (e.button !== 0 || i === undefined || !row) return;
+    if (e.detail <= 1) run = { alt: false, copied: "" };
+    // ⌥-click copies the cell and does nothing else, even where there is nothing to copy: the selection, the marks and
+    // the focus stay.
+    if (copies(e)) {
+      e.preventDefault();
+      run.alt = true;
+      copyCell(e, row);
+      return;
+    }
     if (e.metaKey || e.ctrlKey) toggleMark(row.key);
     // The rows from the selected one to this one, as ⇧J / ⇧K mark them (and go on from here).
     else if (e.shiftKey) markTo(rows(), i, props.model.indexOf);
@@ -124,7 +185,7 @@ export function ResourceTable(props: {
   };
 
   return (
-    <div class="table">
+    <div class="table" classList={{ "copy-cells": copyHeld() }}>
       <div
         class="tscroll"
         ref={scroller}
@@ -163,9 +224,11 @@ export function ResourceTable(props: {
           role="rowgroup"
           style={{ height: `${total() * ROW_H}px` }}
           onMouseDown={onMouseDown}
+          onMouseMove={copyMove}
           onDblClick={(e) => {
             const row = rowFromEvent(e);
-            if (row) openDetails(row.key);
+            // A double click with a ⌥-press in it only copies.
+            if (row && !run.alt) openDetails(row.key);
           }}
           onContextMenu={(e) => {
             const row = rowFromEvent(e);
@@ -246,24 +309,31 @@ function RowView(p: { row: Accessor<UIRow>; index: Accessor<number>; cols: Acces
   );
 }
 
+/**
+ * A cell: its text is `cellText`'s, all of it, which is what ⌥-click copies (the cluster's shows a short name). An
+ * empty one is `empty-cell`, a dash: there is nothing to copy in it.
+ */
 function CellView(p: { col: TableColumn; row: Accessor<UIRow> }) {
   const c = p.col;
+  // A plain value, not `c.id` in the markup: Solid sets the attribute once instead of making an effect of it.
+  const id = c.id;
+  const text = () => cellText(c, p.row(), now);
   switch (c.special) {
     case "name":
       return (
-        <div class="td name" role="gridcell" title={p.row().n}>
-          {p.row().n}
+        <div class="td name" role="gridcell" data-col={id} title={text()}>
+          {text()}
         </div>
       );
     case "namespace":
       return (
-        <div class="td ns" role="gridcell">
-          {p.row().ns ?? ""}
+        <div class="td ns" role="gridcell" data-col={id} classList={{ "empty-cell": !text() }}>
+          {text()}
         </div>
       );
     case "cluster":
       return (
-        <div class="td" role="gridcell" title={p.row().cl}>
+        <div class="td" role="gridcell" data-col={id} title={text()}>
           <span class="cl">
             <span class="swatch" style={{ background: clusterColor(p.row().cl) }} />
             {shortName(p.row().cl)}
@@ -271,21 +341,21 @@ function CellView(p: { col: TableColumn; row: Accessor<UIRow> }) {
         </div>
       );
     case "age":
+      // Empty only without a creation time: whether it is doesn't follow the clock (one reading a tick, the text's).
       return (
-        <div class="td r faint-cell" role="gridcell">
-          {age(p.row().t, now())}
+        <div class="td r faint-cell" role="gridcell" data-col={id} classList={{ "empty-cell": !p.row().t }}>
+          {text()}
         </div>
       );
   }
   const def = columnKind(c.kind);
-  const cell = () => (c.cell ? c.cell(p.row()) : (p.row().c[c.index] ?? null));
+  const cell = () => cellOf(c, p.row());
   const t = def.live ? () => now() : () => 0;
-  const text = () => def.text(cell(), t());
   const tone = () => def.tone?.(cell(), t());
   if (def.dot) {
     return (
-      <div class="td st" role="gridcell" title={text()}>
-        <Show when={text()} fallback={<span class="faint">—</span>}>
+      <div class="td st" role="gridcell" data-col={id} classList={{ "empty-cell": !text() }} title={text()}>
+        <Show when={text()}>
           <span class={`dot tone-${tone() ?? 0}`} />
           <span class={`ellipsis ${tone() === 2 || tone() === 3 || tone() === 4 ? `tone-${tone()}` : ""}`}>{text()}</span>
         </Show>
@@ -295,6 +365,7 @@ function CellView(p: { col: TableColumn; row: Accessor<UIRow> }) {
   return (
     <div
       role="gridcell"
+      data-col={id}
       class={`td ${c.align === "right" ? "r" : ""} ${tone() !== undefined ? `tone-${tone()}` : ""}`}
       classList={{ "empty-cell": text() === "" }}
       title={def.title ? def.title(cell()) : c.kind === "text" || c.kind === "labels" ? text() : undefined}

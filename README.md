@@ -225,12 +225,13 @@ You need Rust and Node.js; [CONTRIBUTING.md](CONTRIBUTING.md) has the details. T
 | `j` `k`, `/`, `↵` | move, filter, open details |
 | `d` `r` `l` `e` `y` `=` | Overview, Relations, Logs, Events, YAML, Compare |
 | `Space` or `⇧J` `⇧K`, then `l` or `=` | mark rows, then see their logs together or compare them |
+| ⌥-click | copy a cell, like a pod's IP |
 | `s`, `a`, `⇧F` | shell, attach, port-forward |
 | `⇧R`, `⇧S`, `⌃D` | restart, scale, delete |
 | ⌘J | the dock with terminals, port-forwards and logs |
 | ⌘, | settings |
 
-On Linux and Windows, ⌘ is Ctrl. All the shortcuts: [docs/keyboard.md](docs/keyboard.md).
+On Linux and Windows, ⌘ is Ctrl and ⌥ is Alt. All the shortcuts: [docs/keyboard.md](docs/keyboard.md).
 
 ## Privacy
 
