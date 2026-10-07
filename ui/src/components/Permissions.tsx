@@ -173,9 +173,8 @@ function Cell(props: { states: (readonly [string, State])[]; what: string }) {
       <span class="perm-sqs">
         <For each={props.states}>{([, s]) => <span class={`perm-sq ${s}`} />}</For>
       </span>
-      <Show when={props.states.length === 1 || glyph()}>
-        <span class={`perm-glyph ${props.states[0]?.[1] ?? ""}`}>{glyph()}</span>
-      </Show>
+      {/* Always there, empty or not: a ✓ in one row and none in the next would move the squares. */}
+      <span class={`perm-glyph ${props.states[0]?.[1] ?? ""}`}>{glyph()}</span>
     </td>
   );
 }

@@ -2858,19 +2858,24 @@ button.fw-local:hover { text-decoration: underline; }
 .perm-cluster { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--fs-xs); background: var(--bg-input); box-shadow: inset 0 0 0 1px var(--border); }
 .perm-cluster .swatch { width: 8px; height: 8px; border-radius: 2px; }
 .perm-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 24px; }
-.perm-table { border-collapse: collapse; font-size: var(--fs-sm); min-width: 640px; }
+/* --perm-glyph: the slot for ✓/✕ after a cell's squares, its 5px gap included. */
+.perm-table { border-collapse: collapse; font-size: var(--fs-sm); min-width: 640px; --perm-glyph: 16px; }
 .perm-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-panel); text-align: center; font-size: var(--fs-xs); font-weight: 600; color: var(--text-3); padding: 8px 10px 6px; border-bottom: 1px solid var(--border-strong); }
 .perm-table th:first-child { text-align: left; padding-left: 0; }
+/* A verb centered over the squares, not over the squares and the ✓/✕ slot. */
+.perm-table th + th { padding-right: calc(10px + var(--perm-glyph)); }
 .perm-table td { border-bottom: 1px solid var(--border); padding: 4px 10px; text-align: center; }
 .perm-table tr:hover td { background: var(--bg-hover); }
 .perm-table tr.sub .perm-res { padding-left: 22px; }
 .perm-table tr.sep td { border-top: 1px solid var(--border-strong); }
 .perm-res { text-align: left !important; padding-left: 0 !important; white-space: nowrap; }
-.perm-res-btn { display: inline-flex; align-items: center; gap: 7px; color: var(--text); }
+/* By its top: an inline-flex box's baseline is its first item's, the icon's bottom edge here — rows with an icon came out taller. */
+.perm-res-btn { display: inline-flex; align-items: center; gap: 7px; color: var(--text); vertical-align: top; }
 .perm-res-btn .icon { color: var(--text-3); }
 .perm-res-btn:hover span { text-decoration: underline; }
-.perm-hint { margin-left: 8px; font-size: var(--fs-xs); }
-.perm-cell { cursor: default; }
+/* Line height 1, as ✓/✕ have: a taller line of their own (a mono font, a symbol) would make their row taller. */
+.perm-hint { margin-left: 8px; font-size: var(--fs-xs); line-height: 1; }
+.perm-cell { cursor: default; white-space: nowrap; }
 .perm-sqs { display: inline-flex; gap: 2px; vertical-align: middle; }
 .perm-sq { display: inline-block; width: 9px; height: 13px; border-radius: 2px; background: var(--bg-active); }
 .perm-legend .perm-sq { height: 9px; }
@@ -2879,7 +2884,7 @@ button.fw-local:hover { text-decoration: underline; }
 .perm-sq.no { background: var(--err-soft); box-shadow: inset 0 0 0 1px var(--err); opacity: 0.8; }
 .perm-sq.unknown { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
 .perm-sq.loading { background: var(--bg-active); animation: pulse 1.4s ease-in-out infinite; }
-.perm-glyph { margin-left: 5px; font-size: 11px; font-weight: 700; vertical-align: middle; }
+.perm-glyph { display: inline-block; width: var(--perm-glyph); padding-left: 5px; text-align: left; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: middle; }
 .perm-glyph.yes { color: var(--ok); }
 .perm-glyph.no { color: var(--err); }
 .perm-table td.na { background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--bg-hover) 4px 5px); }
