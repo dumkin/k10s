@@ -20,6 +20,8 @@ afterEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function mount() {
@@ -27,6 +29,7 @@ async function mount() {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   const hotkeys = await import("../lib/hotkeys");
   const nav = await import("../state/nav");
+  const ui = await import("../state/ui");
   const views = await import("../state/views");
   const { Sidebar } = await import("./Sidebar");
   hotkeys.installHotkeys();
@@ -41,7 +44,7 @@ async function mount() {
     disposeView();
     disposeViews();
   };
-  return { nav };
+  return { nav, ui };
 }
 
 const cmd = (n: number, target: EventTarget = document.body) => {
@@ -103,5 +106,31 @@ describe("sidebar quick keys", () => {
     expect([input.value, document.activeElement === input]).toEqual(["", true]);
     esc();
     expect(document.activeElement === input).toBe(false);
+  });
+});
+
+describe("sidebar edge", () => {
+  it("resizes the sidebar live, at most once a frame, within its bounds", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16));
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+    const { ui } = await mount();
+    const save = vi.spyOn(Storage.prototype, "setItem");
+    const saved = () => save.mock.calls.filter(([key]) => key === "k10s:sidebarWidth").map(([, v]) => Number(v));
+    const edge = document.querySelector<HTMLElement>(".sidebar .resizer")!;
+    edge.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: 228 }));
+    // Moves come faster than frames: the width waits for the next one, and is the last move's.
+    for (let x = 229; x <= 300; x++) window.dispatchEvent(new MouseEvent("mousemove", { clientX: x }));
+    expect(ui.sidebarWidth()).toBe(228);
+    vi.advanceTimersByTime(16);
+    expect([ui.sidebarWidth(), saved(), edge.style.left]).toEqual([300, [300], "296px"]);
+    // Let go before the next frame: the width it was let go at, at once — no wider than the widest.
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 900 }));
+    window.dispatchEvent(new MouseEvent("mouseup", { clientX: 900 }));
+    expect(ui.sidebarWidth()).toBe(420);
+    vi.advanceTimersByTime(100);
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 100 }));
+    vi.advanceTimersByTime(100);
+    expect([ui.sidebarWidth(), saved()]).toEqual([420, [300, 420]]);
   });
 });

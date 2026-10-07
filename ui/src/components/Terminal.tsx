@@ -7,6 +7,8 @@ import { setTermStatus, type TermTab } from "../state/dock";
 
 /** Lines a terminal keeps above its screen. */
 const SCROLLBACK = 10_000;
+/** How long the terminal's box keeps a new width before the terminal takes it (see `boxResized`). */
+const SETTLE_MS = 100;
 
 /** The terminal's colours from the theme's tokens: the logs' ANSI palette on the panel's background. */
 function themeColors(): ITheme {
@@ -106,14 +108,32 @@ export function TerminalView(props: { tab: TermTab; visible: boolean }) {
     session = self;
   };
 
+  let settling: ReturnType<typeof setTimeout> | undefined;
   /** Fits the terminal to its box — only while it is on screen (a hidden one measures nothing). */
   const refit = () => {
+    clearTimeout(settling);
     if (!el || !el.clientWidth || !el.clientHeight) return;
     try {
       fit.fit();
     } catch {
       // not measurable yet
     }
+  };
+  /**
+   * The box changed size: fitted at once while the columns stay, else once its width has stayed for a moment. New
+   * columns reflow the whole scrollback and have the shell (or a full-screen program in it) draw its screen again, and
+   * dragging the sidebar's edge or the window's changes them every few frames.
+   */
+  const boxResized = () => {
+    clearTimeout(settling);
+    let cols: number | undefined;
+    try {
+      cols = fit.proposeDimensions()?.cols;
+    } catch {
+      // not measurable yet
+    }
+    if (cols === undefined || cols === term.cols) refit();
+    else settling = setTimeout(refit, SETTLE_MS);
   };
 
   onMount(() => {
@@ -125,7 +145,7 @@ export function TerminalView(props: { tab: TermTab; visible: boolean }) {
     });
     term.onBinary((data) => session?.input(data, true));
     term.onResize((s) => session?.resize({ cols: s.cols, rows: s.rows }));
-    const resized = new ResizeObserver(() => refit());
+    const resized = new ResizeObserver(boxResized);
     resized.observe(el);
     // The web font may arrive after the first measurement: measure again.
     void document.fonts?.ready.then(refit);
@@ -134,6 +154,7 @@ export function TerminalView(props: { tab: TermTab; visible: boolean }) {
     themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     start();
     onCleanup(() => {
+      clearTimeout(settling);
       resized.disconnect();
       themed.disconnect();
       session?.close();

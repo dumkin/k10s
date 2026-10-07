@@ -147,18 +147,27 @@ export function Sidebar() {
     );
   };
 
-  let dragging = false;
   const startResize = (e: MouseEvent) => {
     e.preventDefault();
-    dragging = true;
     const target = e.currentTarget as HTMLElement;
     target.classList.add("dragging");
-    const move = (ev: MouseEvent) => dragging && setSidebarWidth(Math.max(MIN_W, Math.min(MAX_W, ev.clientX)));
+    let width: number | null = null;
+    let frame = 0;
+    // The new width shows at most once a frame. Mouse events come faster than frames, and WebKit lays the window out
+    // before each one (to find what is under the pointer) when something changed since: one layout per event.
+    const move = (ev: MouseEvent) => {
+      width = Math.max(MIN_W, Math.min(MAX_W, ev.clientX));
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        if (width !== null) setSidebarWidth(width);
+      });
+    };
     const up = () => {
-      dragging = false;
+      cancelAnimationFrame(frame);
       target.classList.remove("dragging");
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      if (width !== null) setSidebarWidth(width);
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
