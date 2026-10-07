@@ -152,9 +152,17 @@ const rowFilter = globalMemo(() => compileFilter(shownFilter()));
  * Actions only ever target visible rows — marks on filtered-out rows stay, but are not acted on.
  */
 export function isRowVisible(r: UIRow): boolean {
-  if (hiddenClusters().has(r.cl)) return false;
+  return rowVisibility()(r);
+}
+
+/**
+ * `isRowVisible` for many rows: what it depends on is read once, not once a row — every read of a signal in a
+ * computation is one more subscription to it, and tens of thousands of marked rows would make as many.
+ */
+export function rowVisibility(): (r: UIRow) => boolean {
+  const hidden = hiddenClusters();
   const f = rowFilter();
-  return !f || f(r);
+  return (r) => !hidden.has(r.cl) && (!f || f(r));
 }
 
 /** Labels of a row (`r.l` is "k=v k2=v2": label keys and values never contain spaces or "="). */

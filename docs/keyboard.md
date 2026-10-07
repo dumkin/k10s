@@ -30,6 +30,8 @@ On Linux and Windows, `⌘` is `Ctrl` (so `⌃D` is also `Ctrl+D`), `⌥` is `Al
 | `⌥1` … `⌥9` / `⌥0` | hide or show the rows of cluster N (like clicking its chip) / show all. `⌘`-click a chip (on macOS `⌃`-click too): only that cluster's rows; again: every cluster's |
 | `⇧N` / `⇧A` | sort by name / age; again to reverse (any column: "Sort by…" in the palette) |
 | `Space`, `⌘A` | mark a row / mark all visible rows |
+| `⇧J` `⇧K` (`⇧↓` `⇧↑`), `⇧`-click | mark the rows on the way from the selected one; going back unmarks them |
+| `⇧PgDn` `⇧PgUp`, `⇧Home` `⇧End` | mark a page down / up, or up to the first / last row |
 | `⇧R`, `⇧S`, `⌃D` (`⌘⌫`), `c` | restart, scale, delete, copy the name (read-only mode explains why not) |
 | `s` / `a` | shell into a pod (on a node: a node shell) / attach to a container's process |
 | `⇧F` | port-forward a pod, service or workload |
@@ -91,6 +93,6 @@ Actions apply to the marked rows if there are any, otherwise to the selected row
 | --- | --- |
 | `Tab` into the sidebar (or `⇧F6`) | `↑` `↓` (`j` `k`) between items, `←` `→` collapse / expand a section, `↵` open, `Esc` back to the table |
 | `Tab` onto a panel edge | arrows resize the sidebar, details or dock (`⇧` for bigger steps), `Home` / `End` for the narrowest / widest |
-| In a menu | `↑` `↓`, `Home` / `End` move; a letter jumps to the next item that starts with it |
+| In a menu | `↑` `↓` (`j` `k`), `Home` / `End` move; the key shown next to an item runs it, on what the menu is for; another letter jumps to the next item that starts with it |
 
 In a terminal every key belongs to the terminal (`Esc`, `⌃C`, `⌃D`), except `⌘` shortcuts on macOS. `⌘⇧J` (`Ctrl+Shift+J`) leaves it. When a shell or attach session has ended, `↵` starts a new one.

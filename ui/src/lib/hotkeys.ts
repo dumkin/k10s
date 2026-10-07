@@ -20,6 +20,11 @@ export interface Binding {
 }
 
 const bindings = new Set<Binding>();
+/**
+ * The bindings of each combo, the highest priority first (ties in the order bound): a keydown looks at its own combos
+ * only, never sorts. Made again on the first keydown after the bindings changed.
+ */
+let byCombo: Map<string, Binding[]> | null = null;
 
 const MODIFIERS = ["mod", "ctrl", "meta", "alt", "shift"];
 const canonicalCache = new Map<string, string>();
@@ -135,7 +140,25 @@ function ownArrows(e: KeyboardEvent): boolean {
 
 export function bind(binding: Binding): () => void {
   bindings.add(binding);
-  return () => bindings.delete(binding);
+  byCombo = null;
+  return () => {
+    bindings.delete(binding);
+    byCombo = null;
+  };
+}
+
+function bindingsByCombo(): Map<string, Binding[]> {
+  if (byCombo) return byCombo;
+  const out = new Map<string, Binding[]>();
+  for (const b of bindings) {
+    const combo = canonicalCombo(b.combo);
+    const list = out.get(combo);
+    if (list) list.push(b);
+    else out.set(combo, [b]);
+  }
+  // A stable sort: equal priorities keep the order they were bound in.
+  for (const list of out.values()) list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  return (byCombo = out);
 }
 
 export function bindAll(list: Binding[]): () => void {
@@ -152,11 +175,10 @@ export function installHotkeys() {
       if (!combos.length) return;
       const typing = isTyping(e) || ownArrows(e);
       const owned = inTerminal(e);
-      const sorted = [...bindings].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      const bound = bindingsByCombo();
       // The typed character wins over the key's US meaning, whatever the priorities.
       for (const combo of combos) {
-        for (const b of sorted) {
-          if (canonicalCombo(b.combo) !== combo) continue;
+        for (const b of bound.get(combo) ?? []) {
           if (typing && !b.inInputs) continue;
           if (owned && !b.inTerminal) continue;
           if (b.when && !b.when()) continue;

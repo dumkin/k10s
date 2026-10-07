@@ -457,7 +457,7 @@ function ActionsBar(props: { actions: ResourceAction[]; ctx: ActionContext }) {
       <Show when={menuOpen() && hidden().length}>
         <Popover anchor={moreBtn} onClose={() => setMenuOpen(false)} width={240} align="right">
           <div class="menu" role="menu" aria-label="More actions">
-            <ActionMenuItems actions={hidden()} ctx={props.ctx} shortcuts={!marked().size} onRun={() => setMenuOpen(false)} />
+            <ActionMenuItems actions={hidden()} ctx={props.ctx} onRun={() => setMenuOpen(false)} />
           </div>
         </Popover>
       </Show>

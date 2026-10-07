@@ -120,6 +120,28 @@ describe("installHotkeys", () => {
     off();
   });
 
+  it("tries the bindings of a combo by priority, then in the order they were bound, also as they come and go", async () => {
+    const { bind, installHotkeys } = await load("MacIntel");
+    const fired: string[] = [];
+    installHotkeys();
+    const tried = (name: string, handles = true) => () => (fired.push(name), handles);
+    const offs = [
+      bind({ combo: "escape", run: tried("first") }),
+      bind({ combo: "escape", priority: 10, run: tried("declines", false) }),
+      bind({ combo: "escape", run: tried("second") }),
+      bind({ combo: "mod+escape", priority: 100, run: tried("other combo") }),
+    ];
+    const esc = () => document.body.dispatchEvent(key({ key: "Escape", code: "Escape" }));
+    esc();
+    expect(fired).toEqual(["declines", "first"]);
+    offs[0]();
+    esc();
+    const offLate = bind({ combo: "escape", priority: 5, run: tried("late") });
+    esc();
+    expect(fired).toEqual(["declines", "first", "declines", "second", "declines", "late"]);
+    [...offs, offLate].forEach((off) => off());
+  });
+
   it("prefers the typed character over the key position", async () => {
     const { bindAll, installHotkeys } = await load("Linux x86_64");
     const fired: string[] = [];

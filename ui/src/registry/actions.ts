@@ -146,7 +146,17 @@ const broad = (c: AccessCheck): AccessCheck => (c.name ? { ...c, name: undefined
  * says no, the object's own (RBAC may grant a role on named objects only), for up to {@link NAME_CHECKS_MAX} rows. A row
  * whose decisions are unknown, or not in yet, is not refused.
  */
-function deniedRows(a: ResourceAction, ctx: ActionContext, look: Lookup): Map<string, Denial> {
+function deniedRows(a: ResourceAction, ctx: ActionContext, lookUp: Lookup): Map<string, Denial> {
+  // Rows mostly ask the same (one namespace, one cluster): each question is looked up once — `accessOf` is reactive,
+  // and every look would be one more subscription.
+  const known = new Map<string, AccessDecision | undefined>();
+  const look: Lookup = (cluster, c) => {
+    const k = checkKey(cluster, c);
+    if (known.has(k)) return known.get(k);
+    const d = lookUp(cluster, c);
+    known.set(k, d);
+    return d;
+  };
   const out = new Map<string, Denial>();
   const named = ctx.rows.length <= NAME_CHECKS_MAX;
   for (const row of ctx.rows) {

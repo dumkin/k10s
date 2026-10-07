@@ -1,6 +1,6 @@
 import { createSignal, getOwner, type JSX, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
-import { bind, bindAll } from "../lib/hotkeys";
+import { bind, bindAll, canonicalCombo, keyCombos } from "../lib/hotkeys";
 import { popoverClosed, popoverOpened } from "../state/ui";
 
 export interface PopoverProps {
@@ -18,20 +18,31 @@ export interface PopoverProps {
 const menuItems = (box: HTMLElement) => [...box.querySelectorAll<HTMLElement>(".menu .opt:not(:disabled)")];
 
 /**
- * A menu's keys, while focus is on one of its items: ↑ / ↓ go round them, Home / End to the first and the last, a
- * letter to the next item starting with it, Tab leaves (closing the menu, as menus do). ↵ and Space are the items'
- * own (they are buttons).
+ * A menu's keys, while focus is on one of its items: the key an item shows (its `data-key`) runs it, as a click does —
+ * while a menu is open the keys are its own, and act on what it is for; ↑ / ↓ (j / k) go round the items, Home / End
+ * to the first and the last, another letter to the next item starting with it, Tab leaves (closing the menu, as menus
+ * do). ↵ and Space are the items' own (they are buttons).
  */
 function menuKeys(box: HTMLElement, e: KeyboardEvent, close: () => void) {
   const items = menuItems(box);
   const at = items.indexOf(document.activeElement as HTMLElement);
-  if (at < 0 || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (at < 0) return;
+  const combos = keyCombos(e);
+  for (const combo of combos) {
+    const item = items.find((el) => el.dataset.key && canonicalCombo(el.dataset.key) === combo);
+    if (item) {
+      e.preventDefault();
+      item.click();
+      return;
+    }
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const go = (i: number) => {
     e.preventDefault();
     items[(i + items.length) % items.length]?.focus();
   };
-  if (e.key === "ArrowDown") go(at + 1);
-  else if (e.key === "ArrowUp") go(at - 1);
+  if (e.key === "ArrowDown" || combos.includes("j")) go(at + 1);
+  else if (e.key === "ArrowUp" || combos.includes("k")) go(at - 1);
   else if (e.key === "Home" || e.key === "PageUp") go(0);
   else if (e.key === "End" || e.key === "PageDown") go(items.length - 1);
   else if (e.key === "Tab") {

@@ -12,6 +12,7 @@ import {
   goBack,
   kubeconfigNamespaces,
   marked,
+  markTo,
   namespaces,
   openDetails,
   REVEAL_TIMEOUT_MS,
@@ -19,7 +20,6 @@ import {
   resourceTitle,
   selectedKey,
   setFilter,
-  setMarked,
   setNamespaces,
   setSelectedKey,
   toggleMark,
@@ -97,27 +97,23 @@ export function ResourceTable(props: {
     }),
   );
 
-  const rowFromEvent = (e: MouseEvent): UIRow | undefined => {
+  const indexFromEvent = (e: MouseEvent): number | undefined => {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-i]");
-    return el ? rows()[Number(el.dataset.i)] : undefined;
+    return el ? Number(el.dataset.i) : undefined;
+  };
+  const rowFromEvent = (e: MouseEvent): UIRow | undefined => {
+    const i = indexFromEvent(e);
+    return i === undefined ? undefined : rows()[i];
   };
 
   const onMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return;
-    const row = rowFromEvent(e);
-    if (!row) return;
-    if (e.metaKey || e.ctrlKey) {
-      toggleMark(row.key);
-    } else if (e.shiftKey && selectedKey() && props.model.indexOf(selectedKey()!) !== undefined) {
-      // Range from the selected row; an anchor that is filtered out would silently mark from the top.
-      const a = props.model.indexOf(selectedKey()!)!;
-      const b = props.model.indexOf(row.key) ?? a;
-      const next = new Set(marked());
-      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(rows()[i].key);
-      setMarked(next);
-    } else {
-      setSelectedKey(row.key);
-    }
+    const i = indexFromEvent(e);
+    const row = i === undefined ? undefined : rows()[i];
+    if (e.button !== 0 || i === undefined || !row) return;
+    if (e.metaKey || e.ctrlKey) toggleMark(row.key);
+    // The rows from the selected one to this one, as ⇧J / ⇧K mark them (and go on from here).
+    else if (e.shiftKey) markTo(rows(), i, props.model.indexOf);
+    else setSelectedKey(row.key);
   };
 
   const startResize = (e: MouseEvent, col: TableColumn) => {

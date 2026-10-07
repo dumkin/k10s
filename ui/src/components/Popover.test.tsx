@@ -1,7 +1,7 @@
 import { render } from "solid-js/web";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { bind, installHotkeys } from "../lib/hotkeys";
-import { createListNav } from "./Popover";
+import { createListNav, Popover } from "./Popover";
 
 beforeAll(() => installHotkeys());
 
@@ -50,5 +50,49 @@ describe("createListNav", () => {
     press({ key: "p", code: "KeyP", ctrlKey: true });
     expect(opened).toEqual(["other"]);
     off();
+  });
+});
+
+describe("a menu", () => {
+  it("runs the item whose key is pressed, moves with j / k, and jumps to an item by its first letter otherwise", async () => {
+    const ran: string[] = [];
+    const root = document.createElement("div");
+    document.body.append(root);
+    dispose = render(
+      () => (
+        <Popover anchor={{ x: 0, y: 0 }} onClose={() => ran.push("closed")}>
+          <div class="menu" role="menu">
+            <button class="opt" data-key="w" onClick={() => ran.push("wrap")}>
+              <span>Wrap lines</span>
+            </button>
+            <button class="opt" onClick={() => ran.push("timestamps")}>
+              <span>Timestamps</span>
+            </button>
+            <button class="opt" data-key="mod+s" onClick={() => ran.push("save")}>
+              <span>Save shown lines…</span>
+            </button>
+          </div>
+        </Popover>
+      ),
+      root,
+    );
+    await Promise.resolve();
+    const items = [...document.querySelectorAll<HTMLButtonElement>(".menu .opt")];
+    const key = (init: KeyboardEventInit) => {
+      const e = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+      (document.activeElement ?? document.body).dispatchEvent(e);
+      return e;
+    };
+    expect(document.activeElement).toBe(items[0]);
+    key({ key: "t", code: "KeyT" });
+    expect(document.activeElement).toBe(items[1]);
+    key({ key: "j", code: "KeyJ" });
+    expect(document.activeElement).toBe(items[2]);
+    key({ key: "k", code: "KeyK" });
+    expect(document.activeElement).toBe(items[1]);
+    expect(ran).toEqual([]);
+    expect(key({ key: "w", code: "KeyW" }).defaultPrevented).toBe(true);
+    expect(key({ key: "s", code: "KeyS", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(ran).toEqual(["wrap", "save"]);
   });
 });

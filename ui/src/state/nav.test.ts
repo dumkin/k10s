@@ -21,6 +21,7 @@ import {
   goForward,
   HISTORY_LIMIT,
   marked,
+  markTo,
   namespaces,
   navigate,
   openDetails,
@@ -34,7 +35,9 @@ import {
   setMarked,
   setNamespaces,
   setSelectedKey,
+  toggleMark,
 } from "./nav";
+import type { UIRow } from "./view";
 
 beforeEach(() => {
   navigate("pods");
@@ -225,5 +228,64 @@ describe("namespace memory", () => {
     setSelectedClustersRaw([]);
     rememberNamespaces(["ledger"]);
     expect(rememberedNamespaces(["prod-eu-z1"])).toEqual([]);
+  });
+});
+
+describe("marking with ⇧ (markTo)", () => {
+  let rows: UIRow[];
+  const indexOf = (key: string) => {
+    const i = rows.findIndex((r) => r.key === key);
+    return i < 0 ? undefined : i;
+  };
+  const to = (n: number) => markTo(rows, n, indexOf);
+  const marks = () => [...marked()].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+
+  beforeEach(() => {
+    rows = Array.from({ length: 10 }, (_, i) => ({ key: `r${i}` }) as UIRow);
+    setMarked(new Set<string>());
+  });
+
+  it("marks from the cursor to where it goes, unmarking on the way back, and keeps the marks made before", () => {
+    setMarked(new Set(["r1"]));
+    setSelectedKey("r4");
+    to(6);
+    expect([marks(), selectedKey()]).toEqual([["r1", "r4", "r5", "r6"], "r6"]);
+    to(5);
+    expect(marks()).toEqual(["r1", "r4", "r5"]);
+    // Past where it started: the other way from there, r1 still marked.
+    to(2);
+    expect([marks(), selectedKey()]).toEqual([["r1", "r2", "r3", "r4"], "r2"]);
+    // Nowhere further (the first row, again): nothing changes.
+    to(0);
+    const before = marked();
+    to(0);
+    expect(marked()).toBe(before);
+  });
+
+  it("starts again at the cursor after anything else changed the marks or moved it", () => {
+    setSelectedKey("r2");
+    to(4);
+    toggleMark("r8");
+    to(5);
+    // From r4 (where the cursor was), not from r2: r2…r4 and r8 stay marked.
+    expect(marks()).toEqual(["r2", "r3", "r4", "r5", "r8"]);
+    setSelectedKey("r7");
+    to(6);
+    expect(marks()).toEqual(["r2", "r3", "r4", "r5", "r6", "r7", "r8"]);
+    to(8);
+    expect(marks()).toEqual(["r2", "r3", "r4", "r5", "r7", "r8"]);
+  });
+
+  it("starts at the cursor when the row it started at is gone, and at the row moved to without a cursor", () => {
+    setSelectedKey("r3");
+    to(5);
+    rows = rows.filter((r) => r.key !== "r3");
+    // r5 is at 4 now: one down from it.
+    to(5);
+    expect([marks(), selectedKey()]).toEqual([["r3", "r4", "r5", "r6"], "r6"]);
+    setMarked(new Set<string>());
+    setSelectedKey("gone");
+    to(0);
+    expect([marks(), selectedKey()]).toEqual([["r0"], "r0"]);
   });
 });

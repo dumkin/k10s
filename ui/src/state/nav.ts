@@ -242,6 +242,40 @@ export function unmark(keys: Iterable<string>) {
   });
 }
 
+/**
+ * Marking with ⇧ (⇧J / ⇧K, ⇧↓ / ⇧↑, ⇧-click): the rows from where it started (`anchor`) to the cursor, on top of the
+ * marks made before it (`base`). Going back towards the anchor unmarks what it marked on the way, as in a file
+ * manager. It goes on as long as nothing else changes the marks or moves the cursor: `marks` and `cursor` are what it
+ * set last.
+ */
+let span: { anchor: string; base: ReadonlySet<string>; marks: ReadonlySet<string>; cursor: string } | null = null;
+
+/**
+ * Moves the cursor to `rows[to]` and marks the rows from the anchor to it: the cursor's row when the marking starts
+ * (the one moved to, without a cursor among `rows`). `indexOf` finds a row in `rows`.
+ */
+export function markTo(rows: readonly UIRow[], to: number, indexOf: (key: string) => number | undefined) {
+  const target = rows[to];
+  if (!target) return;
+  const live = span && span.marks === marked() && span.cursor === selectedKey() ? span : null;
+  if (live?.cursor === target.key) return;
+  let from = live ? indexOf(live.anchor) : undefined;
+  let base = live?.base ?? marked();
+  // Not marking yet, or its anchor is gone (deleted, filtered out): it starts at the cursor, with what is marked now.
+  if (from === undefined) {
+    const cursor = selectedKey();
+    from = (cursor ? indexOf(cursor) : undefined) ?? to;
+    base = marked();
+  }
+  const next = new Set(base);
+  for (let i = Math.min(from, to); i <= Math.max(from, to); i++) next.add(rows[i].key);
+  span = { anchor: rows[from].key, base, marks: next, cursor: target.key };
+  batch(() => {
+    setMarked(next);
+    setSelectedKey(target.key);
+  });
+}
+
 /** How long a reveal waits for its object (it may never show up: deleted, or not listable under RBAC). */
 export const REVEAL_TIMEOUT_MS = 30_000;
 

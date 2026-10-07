@@ -4,7 +4,7 @@ import { PERMISSIONS } from "../lib/permissions";
 import { errorTitle, isError, isForbidden } from "../lib/k8s";
 import { selectedClusters } from "./clusters";
 import { clearMarks, currentResource, marked, namespaces, openDetails, pendingReveal, rememberNamespaces, resourceKey, selectedKey, setPendingReveal } from "./nav";
-import { isRowVisible } from "./table";
+import { rowVisibility } from "./table";
 import { createNamesFeed, createViewFeed, type FeedState, type NamesFeed, type UIRow, type ViewFeed } from "./view";
 
 // App-wide feeds: the main table and the namespace names used by the namespace picker and palette.
@@ -58,24 +58,30 @@ function natKey(name: string): string {
  * What actions apply to: the marked rows if any are marked, else the selected row — in both cases only
  * rows visible in the table. A mark on a filtered-out row (or one in a hidden cluster) is never acted on.
  */
-export function selectionTargets(): UIRow[] {
-  mainView.version();
-  const m = marked();
-  if (m.size) return [...m].map((k) => mainView.rowByKey(k)).filter((r): r is UIRow => !!r && isRowVisible(r));
-  const k = selectedKey();
-  const r = k ? mainView.rowByKey(k) : undefined;
-  return r && isRowVisible(r) ? [r] : [];
-}
+export const selectionTargets = (): UIRow[] => selection().targets;
 
 /** Marked rows that exist but are filtered out or in a hidden cluster. */
-export function hiddenMarkCount(): number {
+export const hiddenMarkCount = (): number => selection().hidden;
+
+/** `selectionTargets` and `hiddenMarkCount` in one pass over the marks (there can be tens of thousands). */
+export function selection(): { targets: UIRow[]; hidden: number } {
   mainView.version();
-  let n = 0;
-  for (const k of marked()) {
-    const r = mainView.rowByKey(k);
-    if (r && !isRowVisible(r)) n++;
+  const m = marked();
+  const visible = rowVisibility();
+  if (m.size) {
+    const targets: UIRow[] = [];
+    let hidden = 0;
+    for (const k of m) {
+      const r = mainView.rowByKey(k);
+      if (!r) continue;
+      if (visible(r)) targets.push(r);
+      else hidden++;
+    }
+    return { targets, hidden };
   }
-  return n;
+  const k = selectedKey();
+  const r = k ? mainView.rowByKey(k) : undefined;
+  return { targets: r && visible(r) ? [r] : [], hidden: 0 };
 }
 
 /**

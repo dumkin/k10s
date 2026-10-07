@@ -1,6 +1,6 @@
 import { createRoot } from "solid-js";
 import { render } from "solid-js/web";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The engine, as far as connecting clusters goes (what a cluster pill does when clicked).
 const engine = vi.hoisted(() => ({ connect: vi.fn(), reconnect: vi.fn() }));
@@ -320,6 +320,116 @@ describe("keyboard", () => {
     other.focus();
     press(other, { key: "f", code: "KeyF", metaKey: true });
     expect(document.activeElement).toBe(document.querySelector(".filter input"));
+  });
+});
+
+describe("marking rows from the keyboard", () => {
+  const key = (init: KeyboardEventInit) => press(document.body, init);
+  const marks = (nav: Awaited<ReturnType<typeof mount>>["nav"]) => [...nav.marked()].map((k) => Number(k.slice("z1/pod-".length))).sort((a, b) => a - b);
+
+  it("marks the rows on the way with ⇧J / ⇧K and ⇧↓ / ⇧↑, unmarking them on the way back", async () => {
+    const { nav } = await mount("Linux x86_64");
+    nav.setMarked(new Set(["z1/pod-1"]));
+    nav.setSelectedKey("z1/pod-5");
+    key({ key: "J", code: "KeyJ", shiftKey: true });
+    // On a Russian layout too: ⇧О is on the J key.
+    key({ key: "О", code: "KeyJ", shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[1, 5, 6, 7], "z1/pod-7"]);
+    key({ key: "K", code: "KeyK", shiftKey: true });
+    key({ key: "ArrowUp", code: "ArrowUp", shiftKey: true });
+    key({ key: "ArrowUp", code: "ArrowUp", shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[1, 4, 5], "z1/pod-4"]);
+    key({ key: "ArrowDown", code: "ArrowDown", shiftKey: true });
+    expect(marks(nav)).toEqual([1, 5]);
+    // A plain move leaves the marks; ⇧ marks from there on.
+    key({ key: "j", code: "KeyJ" });
+    key({ key: "J", code: "KeyJ", shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[1, 5, 6, 7], "z1/pod-7"]);
+    // Space unmarks one of them: ⇧K starts again from the cursor.
+    key({ key: " ", code: "Space" });
+    key({ key: "K", code: "KeyK", shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[1, 5, 6, 7, 8], "z1/pod-7"]);
+  });
+
+  it("marks a page, or up to the first or the last row, with ⇧ and PgDn / PgUp, Home / End", async () => {
+    const { nav } = await mount("MacIntel");
+    // Room for 10 rows under the header: a page is 9.
+    Object.defineProperty(document.querySelector(".tscroll")!, "clientHeight", { configurable: true, value: 31 + 10 * 28 });
+    nav.setSelectedKey("z1/pod-20");
+    key({ key: "PageDown", code: "PageDown", shiftKey: true });
+    expect([marks(nav).length, nav.selectedKey()]).toEqual([10, "z1/pod-29"]);
+    key({ key: "End", code: "End", shiftKey: true });
+    expect([marks(nav).length, nav.selectedKey()]).toEqual([80, "z1/pod-99"]);
+    key({ key: "Home", code: "Home", shiftKey: true });
+    expect([marks(nav).length, nav.selectedKey()]).toEqual([21, "z1/pod-0"]);
+    key({ key: "PageUp", code: "PageUp", shiftKey: true });
+    expect(marks(nav).length).toBe(21);
+  });
+
+  it("marks with a ⇧-click from the selected row as the keys do, and goes on from there", async () => {
+    const { nav } = await mount("MacIntel");
+    const down = (n: number, init: MouseEventInit = {}) => {
+      const row = [...document.querySelectorAll(".tr")].find((r) => r.querySelector(".name")?.textContent === `pod-${n}`)!;
+      row.querySelector(".td")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, ...init }));
+    };
+    down(3);
+    down(6, { shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[3, 4, 5, 6], "z1/pod-6"]);
+    down(4, { shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[3, 4], "z1/pod-4"]);
+    key({ key: "J", code: "KeyJ", shiftKey: true });
+    expect(marks(nav)).toEqual([3, 4, 5]);
+    // ⌘-click marks one more, the cursor stays: a ⇧-click marks from the cursor again.
+    down(9, { metaKey: true });
+    down(7, { shiftKey: true });
+    expect([marks(nav), nav.selectedKey()]).toEqual([[3, 4, 5, 6, 7, 9], "z1/pod-7"]);
+  });
+});
+
+describe("the context menu", () => {
+  const key = (init: KeyboardEventInit) => press(document.activeElement ?? document.body, init);
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const items = () => [...document.querySelectorAll<HTMLButtonElement>(".menu .opt")];
+  let copied: string[];
+
+  beforeEach(() => {
+    copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  });
+  afterEach(() => Reflect.deleteProperty(navigator, "clipboard"));
+
+  it("runs the key an item shows on what the menu acts on, and leaves the table alone meanwhile", async () => {
+    const { nav } = await mount("Linux x86_64");
+    nav.setMarked(new Set(["z1/pod-1", "z1/pod-2"]));
+    nav.setSelectedKey("z1/pod-2");
+    key({ key: "F10", code: "F10", shiftKey: true });
+    await settle();
+    const copy = items().find((b) => b.querySelector("span")?.textContent === "Copy 2 names")!;
+    expect(copy.querySelector(".kbd")?.textContent).toBe("C");
+    // j / k move in the menu, not in the table.
+    expect(document.activeElement).toBe(items()[0]);
+    key({ key: "j", code: "KeyJ" });
+    expect(document.activeElement).toBe(items()[1]);
+    key({ key: "k", code: "KeyK" });
+    key({ key: "k", code: "KeyK" });
+    expect(document.activeElement).toBe(items().at(-1));
+    expect(nav.selectedKey()).toBe("z1/pod-2");
+    // On a Russian layout too: "с" is on the C key.
+    expect(key({ key: "с", code: "KeyC" }).defaultPrevented).toBe(true);
+    await settle();
+    expect([copied, document.querySelector(".menu")]).toEqual([["pod-1\npod-2"], null]);
+  });
+
+  it("acts on the row it was opened on, marks elsewhere or not", async () => {
+    const { nav } = await mount("MacIntel");
+    nav.setMarked(new Set(["z1/pod-1", "z1/pod-2"]));
+    const row = [...document.querySelectorAll(".tr")].find((r) => r.querySelector(".name")?.textContent === "pod-7")!;
+    row.querySelector(".td")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    await settle();
+    expect(document.querySelector(".menu-target")?.textContent).toBe("pod-7");
+    key({ key: "c", code: "KeyC" });
+    await settle();
+    expect([copied, nav.marked().size]).toEqual([["pod-7"], 2]);
   });
 });
 

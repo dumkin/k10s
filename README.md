@@ -224,7 +224,7 @@ You need Rust and Node.js; [CONTRIBUTING.md](CONTRIBUTING.md) has the details. T
 | ⌘⇧C, ⌘⇧N | clusters, namespaces |
 | `j` `k`, `/`, `↵` | move, filter, open details |
 | `d` `r` `l` `e` `y` `=` | Overview, Relations, Logs, Events, YAML, Compare |
-| `Space`, then `l` or `=` | mark rows, then see their logs together or compare them |
+| `Space` or `⇧J` `⇧K`, then `l` or `=` | mark rows, then see their logs together or compare them |
 | `s`, `a`, `⇧F` | shell, attach, port-forward |
 | `⇧R`, `⇧S`, `⌃D` | restart, scale, delete |
 | ⌘J | the dock with terminals, port-forwards and logs |

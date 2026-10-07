@@ -785,20 +785,20 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle) => void }) 
               <Show
                 when={inSpan(m.line) && c.spanLines().length > 1}
                 fallback={
-                  <button class="opt" role="menuitem" onClick={() => (setLineMenu(null), c.copyLines([m.line], "text"))}>
+                  <button class="opt" role="menuitem" data-key="c" onClick={() => (setLineMenu(null), c.copyLines([m.line], "text"))}>
                     <Icon name="copy" size={13} />
                     <span>Copy the line</span>
                     <span class="kbd">C</span>
                   </button>
                 }
               >
-                <button class="opt" role="menuitem" onClick={() => (setLineMenu(null), c.copyLines(c.spanLines(), "text"))}>
+                <button class="opt" role="menuitem" data-key="c" onClick={() => (setLineMenu(null), c.copyLines(c.spanLines(), "text"))}>
                   <Icon name="copy" size={13} />
                   <span>Copy the {count(c.spanLines().length)} lines picked</span>
                   <span class="kbd">C</span>
                 </button>
               </Show>
-              <button class="opt" role="menuitem" onClick={() => (setLineMenu(null), c.toggleExpanded(m.line))}>
+              <button class="opt" role="menuitem" data-key="x" onClick={() => (setLineMenu(null), c.toggleExpanded(m.line))}>
                 <Icon name="chevron-right" size={13} />
                 <span>{c.expanded().has(m.line) ? "Collapse" : "Expand"}</span>
                 <span class="kbd">X</span>

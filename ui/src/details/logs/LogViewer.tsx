@@ -949,6 +949,7 @@ export function LogViewer(props: LogViewerProps) {
                     role={item.on !== undefined ? "menuitemcheckbox" : "menuitem"}
                     aria-checked={item.on !== undefined ? item.on : undefined}
                     title={item.title}
+                    data-key={item.hint}
                     onClick={() => {
                       setMenuAt(undefined);
                       item.run();

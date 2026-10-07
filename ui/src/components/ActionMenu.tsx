@@ -6,9 +6,9 @@ import { Icon } from "./Icon";
 /**
  * Actions as items of a menu (the table's context menu, the details' "More"): destructive ones after a separator,
  * the ones read-only mode or missing permissions turn off greyed out — which of them where the key would be, the
- * tooltip says why. `shortcuts`: show the keys (only when they act on what the menu does).
+ * tooltip says why. An item's key runs it while the menu is open (see `Popover`), on what the menu acts on.
  */
-export function ActionMenuItems(props: { actions: ResourceAction[]; ctx: ActionContext; shortcuts: boolean; onRun: () => void }) {
+export function ActionMenuItems(props: { actions: ResourceAction[]; ctx: ActionContext; onRun: () => void }) {
   // By position, not by object: the actions are made anew whenever the cluster answers an access check, and the item
   // with the keyboard must stay the same element (a new one would drop the focus).
   return (
@@ -24,6 +24,7 @@ export function ActionMenuItems(props: { actions: ResourceAction[]; ctx: ActionC
             classList={{ danger: !!a().danger, locked: !!a().disabled, rbac: a().lock === "rbac" }}
             aria-disabled={a().disabled ? "true" : undefined}
             title={a().disabled ? a().disabledReason : a().note}
+            data-key={a().disabled ? undefined : a().shortcut}
             onClick={() => {
               const action = a();
               if (action.disabled) return;
@@ -36,7 +37,7 @@ export function ActionMenuItems(props: { actions: ResourceAction[]; ctx: ActionC
             <Show when={a().disabled}>
               <span class="ro-tag">{a().lock === "rbac" ? "no access" : "read-only"}</span>
             </Show>
-            <Show when={props.shortcuts && a().shortcut && !a().disabled}>
+            <Show when={a().shortcut && !a().disabled}>
               <span class="kbd">{comboLabel(a().shortcut!)}</span>
             </Show>
           </button>

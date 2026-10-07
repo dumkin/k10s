@@ -21,6 +21,7 @@ import {
   goBack,
   goForward,
   marked,
+  markTo,
   NAMESPACE_KEYS,
   namespaceKeys,
   namespaces,
@@ -41,7 +42,7 @@ import {
 import { createTableModel, FILTER_HELP, hiddenClusters, isColumnVisible, onlyClusterShown, setColumnVisible, setHiddenClusters, soloCluster, sort, toggleClusterHidden, toggleSort } from "../state/table";
 import { paletteOpen, pickerOpen, toast } from "../state/ui";
 import type { UIRow } from "../state/view";
-import { hiddenMarkCount, mainView, selectionTargets } from "../state/views";
+import { mainView, selection } from "../state/views";
 import { ActionMenuItems } from "./ActionMenu";
 import { DetailsPanel } from "./DetailsPanel";
 import { Icon } from "./Icon";
@@ -54,16 +55,17 @@ export function ResourceView() {
   let table: TableHandle | undefined;
   let filterInput: HTMLInputElement | undefined;
   /** Context menu; its target rows are fixed when it opens, whatever happens to the selection meanwhile. */
-  const [menu, setMenu] = createSignal<{ x: number; y: number; ctx: ActionContext; shortcuts: boolean } | null>(null);
+  const [menu, setMenu] = createSignal<{ x: number; y: number; ctx: ActionContext } | null>(null);
   const [columnsAnchor, setColumnsAnchor] = createSignal<HTMLElement>();
 
   const title = () => resourceTitle(resourceKey());
   const rows = model.sorted;
 
+  const selected = createMemo(selection);
   /** Visible marked rows if any are marked, else the selected row (see `selectionTargets`). */
-  const targets = createMemo<UIRow[]>(selectionTargets);
+  const targets = () => selected().targets;
   const actionCtx = createMemo<ActionContext>(() => ({ resourceKey: resourceKey(), resource: currentResource(), rows: targets() }));
-  const hiddenMarks = createMemo(() => (marked().size ? hiddenMarkCount() : 0));
+  const hiddenMarks = () => selected().hidden;
 
   const perCluster = createMemo(() => {
     const counts = new Map<string, number>();
@@ -88,13 +90,21 @@ export function ResourceView() {
   const showStrip = () => isMultiCluster() || selectedClusters().some((c) => !["ready", "loading"].includes(clusterState(c).state));
 
   // ------------------------------------------------------------------ keyboard
-  const moveBy = (delta: number) => {
+  /** Where a move by `delta` rows goes (±Infinity: the first / last row); undefined in an empty table. */
+  const moveTarget = (delta: number): number | undefined => {
     const list = rows();
-    if (!list.length) return;
+    if (!list.length) return undefined;
     const cur = selectedKey() ? model.indexOf(selectedKey()!) : undefined;
-    const next =
-      delta === -Infinity ? 0 : delta === Infinity ? list.length - 1 : cur === undefined ? (delta > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, cur + delta));
-    setSelectedKey(list[next].key);
+    return delta === -Infinity ? 0 : delta === Infinity ? list.length - 1 : cur === undefined ? (delta > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, cur + delta));
+  };
+  const moveBy = (delta: number) => {
+    const i = moveTarget(delta);
+    if (i !== undefined) setSelectedKey(rows()[i].key);
+  };
+  /** A move with ⇧: marks the rows on the way (see `markTo`). */
+  const markBy = (delta: number) => {
+    const i = moveTarget(delta);
+    if (i !== undefined) markTo(rows(), i, model.indexOf);
   };
   const overlayOpen = () => modalOpen() || !!menu() || !!columnsAnchor();
   // Keyboard focus in the details panel (logs, YAML, its buttons), or the panel filling the window: navigation,
@@ -128,6 +138,15 @@ export function ResourceView() {
       { combo: "home", run: () => moveBy(-Infinity) },
       { combo: "shift+g", run: () => moveBy(Infinity) },
       { combo: "end", run: () => moveBy(Infinity) },
+      // With ⇧: marking the rows on the way, as ⇧J / ⇧K pick lines in the logs.
+      { combo: "shift+j", run: () => markBy(1) },
+      { combo: "shift+arrowdown", run: () => markBy(1) },
+      { combo: "shift+k", run: () => markBy(-1) },
+      { combo: "shift+arrowup", run: () => markBy(-1) },
+      { combo: "shift+pagedown", run: () => markBy(page()) },
+      { combo: "shift+pageup", run: () => markBy(-page()) },
+      { combo: "shift+home", run: () => markBy(-Infinity) },
+      { combo: "shift+end", run: () => markBy(Infinity) },
       // A focused button or link (Tab, Full Keyboard Access, a click on Linux/Windows) keeps its own Enter and Space.
       {
         combo: "enter",
@@ -357,11 +376,8 @@ export function ResourceView() {
   createEffect(on([resourceKey, selectedClusters, namespaces, paletteOpen, pickerOpen], () => setMenu(null), { defer: true }));
 
   const onContextMenu = (row: UIRow, e: MouseEvent) => {
-    const onMarks = marked().has(row.key);
-    const rows = onMarks ? targets() : [row];
-    // Shortcuts act on the marks (or the selected row): only hint them when that is what the menu targets.
-    const shortcuts = onMarks || !marked().size;
-    setMenu({ x: e.clientX, y: e.clientY, ctx: { resourceKey: resourceKey(), resource: currentResource(), rows }, shortcuts });
+    const rows = marked().has(row.key) ? targets() : [row];
+    setMenu({ x: e.clientX, y: e.clientY, ctx: { resourceKey: resourceKey(), resource: currentResource(), rows } });
   };
 
   /**
@@ -376,7 +392,7 @@ export function ResourceView() {
     const r = sel?.getBoundingClientRect();
     const visible = r && box && r.top >= box.top + 30 && r.bottom <= box.bottom;
     const at = visible ? { x: r.left + 8, y: r.bottom + 2 } : { x: (box?.left ?? 0) + 24, y: (box?.top ?? 0) + 34 };
-    setMenu({ ...at, ctx, shortcuts: true });
+    setMenu({ ...at, ctx });
   };
   /** What the context menu acts on, as its header says. */
   const menuTarget = (ctx: ActionContext) => (ctx.rows.length > 1 ? `${ctx.rows.length} marked ${resourceTitle(ctx.resourceKey).toLowerCase()}` : (ctx.rows[0]?.n ?? ""));
@@ -559,7 +575,7 @@ export function ResourceView() {
               <div class="pop-group menu-target" aria-hidden="true">
                 {menuTarget(m.ctx)}
               </div>
-              <ActionMenuItems actions={actionsFor(m.ctx)} ctx={m.ctx} shortcuts={m.shortcuts} onRun={() => setMenu(null)} />
+              <ActionMenuItems actions={actionsFor(m.ctx)} ctx={m.ctx} onRun={() => setMenu(null)} />
             </div>
           </Popover>
         )}

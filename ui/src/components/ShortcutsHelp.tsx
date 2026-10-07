@@ -44,6 +44,8 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "/ | mod+f", text: "Filter: foo !bar app=web" },
       { keys: "enter", text: "Details" },
       { keys: "space | mod+a", text: "Mark the row (and go down) / mark all shown" },
+      { keys: "shift+j shift+k | shift+arrowdown shift+arrowup", text: "Mark the rows on the way (⇧-click too); going back unmarks them" },
+      { keys: "shift+pagedown shift+pageup | shift+home shift+end", text: "Mark a page down / up, or up to the first / last row" },
       { keys: "shift+n | shift+a", text: "Sort by name / age; again: the other way" },
       { keys: "0 | 1 … 9", text: "All namespaces / a namespace on its number key" },
       { keys: "alt+1 … alt+9 | alt+0", text: `Hide or show a cluster's rows / show all (${comboLabel("mod")}-click its chip: only its rows)` },
@@ -112,7 +114,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
   {
     title: "Menus, lists and panels",
     rows: [
-      { keys: "arrowdown arrowup | home end", text: "Menus: move; a letter jumps to the item starting with it" },
+      { keys: "arrowdown arrowup | j k | home end", text: "Menus: move. The key next to an item runs it; another letter jumps to the item starting with it" },
       { keys: "tab", text: "Into the sidebar, the details' tabs, a panel's edge — then the arrows move there" },
       { keys: "arrowleft arrowright", text: "Details tabs: the previous / next one. A panel's edge: resize it (⇧: in bigger steps)" },
       { keys: "escape", text: "Sidebar: back to the table. Otherwise: dismiss the newest notification" },
