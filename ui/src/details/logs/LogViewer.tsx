@@ -21,12 +21,15 @@ import { LogLines, type LinesHandle } from "./LogLines";
 import { LogPatterns } from "./LogPatterns";
 import { LogStrip } from "./LogStrip";
 import {
+  BEHIND_MS,
   buildFilters,
   type FilterState,
   FOLD_AT,
   filterMode,
   fold,
   histogramOpen,
+  type Lag,
+  Lags,
   LineSubject,
   patternIdOf,
   pretty,
@@ -58,8 +61,6 @@ import type { Highlight } from "./render";
 export const MAX_TARGETS = 50;
 /** A log this big is filtered once typing pauses, not on every key. */
 const BIG_LOG = 30_000;
-/** The newest lines coming this long after they were written: the view says how far behind it is. */
-const BEHIND_MS = 5000;
 /**
  * Lines that keep coming are shown at most every `showEvery` ms (the first after a quiet spell at once), and further
  * apart the more the last showing cost, up to `maxEvery`; while the user scrolls the lines read, they wait for the
@@ -196,6 +197,8 @@ export interface LogCtx {
   rate: Accessor<number | null>;
   /** How long after they were written the newest lines came (ms), when that is long enough to tell; else null. */
   behind: Accessor<number | null>;
+  /** How late a source's lines come, or how long it has been quiet (see `Lags`). */
+  lag: (i: number) => Lag | undefined;
   /** Lines held back may come in now (the pointer was released, the view is on screen again). */
   flush: () => void;
   /** Whether the line was just expanded by the user (once: it is then scrolled into view). */
@@ -262,6 +265,9 @@ export function LogViewer(props: LogViewerProps) {
   const arrivals: [number, number, number][] = [];
   const [rate, setRate] = createSignal<number | null>(null);
   const [behind, setBehind] = createSignal<number | null>(null);
+  /** The stream's sources: how late their lines come (see `Lags`). */
+  let lags = new Lags();
+  const [sourceLags, setSourceLags] = createStore<Record<number, Lag>>({});
   const meter = setInterval(() => {
     const now = Date.now();
     while (arrivals.length && arrivals[0][0] < now - 10_000) arrivals.shift();
@@ -271,6 +277,7 @@ export function LogViewer(props: LogViewerProps) {
     let late = Infinity;
     for (const [at, , lag] of arrivals) if (at >= now - 3000) late = Math.min(late, lag);
     setBehind(late >= BEHIND_MS && late < Infinity ? late : null);
+    setSourceLags(reconcile(lags.at(now)));
   }, 1000);
   onCleanup(() => clearInterval(meter));
   let patternIds = new PatternIds();
@@ -326,8 +333,10 @@ export function LogViewer(props: LogViewerProps) {
         setRange(null);
         setOnly(new Set<number>());
         setHiddenPatterns(new Set<number>());
+        setSourceLags(reconcile({}));
       });
       earlier = undefined;
+      const lag = (lags = new Lags());
       if (!s) return;
       const logSpec: LogSpec = { targets: srcs.assign(untrack(selection).targets), follow: !s.previous, tailLines: s.tail, sinceSeconds: s.since, previous: s.previous, label: untrack(props.label) };
       // The state each target was last in: changes after the first become markers in the timeline.
@@ -436,6 +445,7 @@ export function LogViewer(props: LogViewerProps) {
         resumed = () => {};
       });
       const started = Date.now();
+      lag.ask(logSpec.targets.map((t) => t.id!), started);
       /** How late lines came at the least (a node's clock behind this one's is no lag): what late is measured from. */
       let floor = Infinity;
       const sub = backend().streamLogs(logSpec, (m) => {
@@ -467,6 +477,7 @@ export function LogViewer(props: LogViewerProps) {
         let live = 0;
         for (const l of m.l) if (l[1] === null || l[1] >= from) live++;
         if (live) arrivals.push([now, live, newest > -Infinity ? Math.max(0, now - newest - floor) : 0]);
+        lag.add(m.l, now, floor);
         schedule();
       });
       onCleanup(() => sub.close());
@@ -479,6 +490,7 @@ export function LogViewer(props: LogViewerProps) {
           (sel) => {
             const listed = new Set(props.pods().map(podKeyOf));
             const targets = srcs.assign(sel.targets, (src) => (listed.has(podKeyOf(src)) ? "no longer streamed" : "pod deleted"));
+            lag.ask(targets.map((t) => t.id!), Date.now());
             show();
             batch(() => {
               for (const src of srcs.byId) {
@@ -929,6 +941,7 @@ export function LogViewer(props: LogViewerProps) {
     loadEarlier: () => earlier?.load(),
     rate: () => (pausedAt() === null ? rate() : null),
     behind: () => (pausedAt() === null ? behind() : null),
+    lag: (i) => sourceLags[i],
     flush: () => flush(),
     takeOpened: (l) => {
       if (opened !== l) return false;

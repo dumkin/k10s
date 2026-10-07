@@ -1079,6 +1079,8 @@ export class MockBackend implements Backend {
     // batches as the engine sends them: every 50 ms, every 250 ms from 100 lines a second on.
     const rate = Number(localStorage.getItem("k10s:mock.logRate")) || 0;
     const every = !rate ? 400 : rate * spec.targets.length >= 100 ? 250 : 50;
+    // A stream held up: `localStorage["k10s:mock.logLag"]` ms after they were written, every third container's lines come.
+    const lag = Number(localStorage.getItem("k10s:mock.logLag")) || 0;
     const timer = setInterval(() => {
       if (closed || !follow || !live.size) return;
       const now = Date.now();
@@ -1087,7 +1089,8 @@ export class MockBackend implements Backend {
       const n = rate ? Math.round((rate * ids.length * every) / 1000) : Math.floor(rnd() * 4);
       for (let k = 0; k < n && ids.length; k++) {
         const i = ids[Math.floor(rnd() * ids.length)];
-        for (const text of logLines(live.get(i)!, now)) lines.push([i, now, text]);
+        const ts = i % 3 === 1 ? now - lag : now;
+        for (const text of logLines(live.get(i)!, ts)) lines.push([i, ts, text]);
       }
       // Now and then a crashy container dies, waits and comes back.
       for (const i of ids) {

@@ -127,6 +127,47 @@ describe("LogsTab", () => {
     expect(strip(root).textContent).toContain("live · 1 ended");
   });
 
+  it("says in Sources whose lines come late, and which pod wrote nothing for a while", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    try {
+      h.setPods([pod("web-a"), pod("web-b"), pod("web-c")]);
+      const root = await mount();
+      await tick();
+      const s = h.streams[0];
+      for (const i of [0, 1, 2]) s.send({ t: "state", i, state: "streaming" });
+      // web-c last wrote 5 minutes ago (its history); web-a's lines come as they are written, web-b's 45 s later.
+      s.send({ t: "lines", l: [[2, Date.now() - 300_000, "from c"]] });
+      for (let k = 1; k <= 60; k++) {
+        vi.advanceTimersByTime(1000);
+        s.send({
+          t: "lines",
+          l: [
+            [0, Date.now(), `from a ${k}`],
+            [1, Date.now() - 45_000, `from b ${k}`],
+          ],
+        });
+      }
+      vi.advanceTimersByTime(1000);
+      await tick();
+      root.querySelector<HTMLButtonElement>('button[title^="Sources"]')!.click();
+      await tick();
+      const rows = [...document.querySelectorAll(".lsrc")];
+      expect(rows.map((r) => [r.querySelector(".lsrc-pod")!.textContent, r.querySelector(".lsrc-state")!.textContent])).toEqual([
+        ["web-a", "live"],
+        ["web-b", "45s behind"],
+        ["web-c", "last line 6m1s ago"],
+      ]);
+      expect(rows.map((r) => r.querySelector(".lsrc-state")!.classList.contains("tone-warn"))).toEqual([false, true, false]);
+      // A name too long is cut before its end, which stays (pods of a workload differ there).
+      expect([...rows[0].querySelector(".lsrc-pod")!.children].map((e) => [e.className, e.textContent])).toEqual([
+        ["ellipsis", "web"],
+        ["", "-a"],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts over when what is shown changes, and does not remember All lines", async () => {
     h.setPods([pod("web-a")]);
     const root = await mount();
