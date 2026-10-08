@@ -2,26 +2,34 @@
 
 <!-- Written for each release by the prepare-release skill (.claude/skills/prepare-release): New, Improved, Fixed, Notes. -->
 
-The first release of k10s: one window for many Kubernetes clusters at once, on macOS, Windows and Linux.
-
 ### New
 
-- **Many clusters in one table**: any number of contexts, live, with a cluster column and a status strip; clusters named as zones of one family (`prod-eu-z1`…`z3`) fold into one group.
-- **Works without cluster-admin**: namespaces that worked are remembered, an action you can't take is grayed out with the reason, and **My permissions** (`:can`) shows every verb in every cluster.
-- **Compare** (`=`): an object against its copies in every cluster, only the fields that differ.
-- **Needs attention**: what is failing in all the selected clusters, one row per problem, with where it happens.
-- **Logs** of pods and whole workloads across clusters, merged by time, with a query language, JSON tables, patterns and trace following.
-- **Shells, attach, debug containers and node shells** in tabs that stay open while you work elsewhere; **port-forwards** that survive reloads, sleep and network changes.
-- **Read-only mode** enforced by the engine on every request; confirmations list every object with its cluster.
-- **Helm** releases read from the cluster: values, manifest, history, diffs, rollback and uninstall.
-- **Metrics** from metrics-server, a command palette (⌘K), k9s-style commands (`:po`, `:ns`, `:ctx`), and every shortcut on screen while you hold ⌘ (Ctrl on Windows and Linux).
-- **Settings** (⌘,) in a window, and in `settings.json`, which you can edit by hand.
-- **Updates** built in: k10s checks GitHub Releases, verifies each update against the project's signing key, and offers to restart into it.
+- **Recent filters and log queries**: `↑` in the table's filter or in the log query, or a click on its icon, lists what you used there lately. Typing narrows the list, `↵` applies one, `⇧⌫` forgets one. The table keeps 20, the log query 30.
+- **Copy any cell** with ⌥-click (Alt-click on Windows and Linux): a pod's IP, its node, a cluster's full context name. While ⌥ is held, the cell a click would copy is highlighted.
+- **Late pods in Sources**: the log's Sources list says when a pod's lines come late (`45s behind`) or the pod has gone quiet (`last line 2m ago`). A late pod's lines are the oldest as they come, so a full buffer drops them first: that is why such a pod shows few lines.
+- **Linux software centers** describe k10s: the `.deb`, `.rpm` and AppImage carry AppStream metadata with a description, screenshots and the list of releases.
+
+### Improved
+
+- **Logs keep up with huge, fast lines**: a stream of kilobyte-long JSON lines no longer leaves the view half blank, jumping, or tens of seconds behind. While you read, scroll, select or pause, the view stays where it is, and the strip says how far behind the newest lines come.
+- **The histogram is a steady time tape**: bars keep their width, the newest on the right, and filters lower them without moving them. The bar under the pointer is lit and tells its time, a click or a drag picks what is under the pointer, and ticks show the time of day.
+- **Dragging a panel's edge** (the sidebar's, the details', the dock's, a column's) takes about a third of the CPU it did, also with logs or a terminal open.
+- **Copying** says what it copied, or why it couldn't: names, details, log fields and port-forwards alike.
+
+### Fixed
+
+- At a UI zoom other than 100%, the sidebar is no longer drawn wider than its edge (at 200% it could leave the table no room).
+- A pod's Overview no longer jumps back up every second after a container restarted, folding the environment and hiding revealed Secrets again.
+- A right-click on the sidebar's edge no longer leaves the sidebar following the pointer.
+- Compare: a long name no longer runs out of its chip over the next one.
+- My permissions: the squares and the rows line up.
+- Escape while dragging over the histogram no longer also closes the details.
+- macOS: if installing an update fails, the installed app is no longer deleted (for updates from this version on).
 
 ### Notes
 
-- The apps aren't notarized by Apple or signed for Windows. The first time, macOS asks you to allow k10s in **System Settings → Privacy & Security**, and Windows SmartScreen needs **More info → Run anyway**.
-- k10s doesn't edit or apply YAML: the README's "Limitations and gaps" lists what it doesn't do.
+- The apps still aren't notarized by Apple or signed for Windows. The first time, macOS asks you to allow k10s in **System Settings → Privacy & Security**, and Windows SmartScreen needs **More info → Run anyway**.
+- Coming from 0.1.0? See also [what's new in 0.1.1](https://github.com/dumkin/k10s/releases/tag/v0.1.1).
 
 ### Install
 

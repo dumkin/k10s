@@ -75,27 +75,28 @@
   <screenshots>
     <screenshot type="default">
       <caption>The deployments of four clusters in one table, next to the merged logs of one deployment</caption>
-      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.1.1/docs/assets/hero-dark.jpg</image>
+      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.2.0/docs/assets/hero-dark.jpg</image>
     </screenshot>
     <screenshot>
       <caption>Compare: one deployment against its copies in four clusters</caption>
-      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.1.1/docs/assets/compare.jpg</image>
+      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.2.0/docs/assets/compare.jpg</image>
     </screenshot>
     <screenshot>
       <caption>Needs attention: one row per problem, with the clusters where it happens</caption>
-      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.1.1/docs/assets/attention.jpg</image>
+      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.2.0/docs/assets/attention.jpg</image>
     </screenshot>
     <screenshot>
       <caption>Relations: from the ingress to the pods, and what is missing</caption>
-      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.1.1/docs/assets/relations.jpg</image>
+      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.2.0/docs/assets/relations.jpg</image>
     </screenshot>
     <screenshot>
       <caption>My permissions: what you may do, in each cluster</caption>
-      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.1.1/docs/assets/permissions.jpg</image>
+      <image>https://raw.githubusercontent.com/dumkin/k10s/v0.2.0/docs/assets/permissions.jpg</image>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="0.2.0" date="2026-10-08"/>
     <release version="0.1.1" date="2026-10-07"/>
     <release version="0.1.0" date="2026-10-06"/>
   </releases>
