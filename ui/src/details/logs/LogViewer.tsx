@@ -32,9 +32,9 @@ import {
   LineSubject,
   patternIdOf,
   pretty,
+  recentQueries,
   regexMode,
   matchCase,
-  rememberQuery,
   setFold,
   setHistogramOpen,
   setFilterMode,
@@ -910,12 +910,14 @@ export function LogViewer(props: LogViewerProps) {
     filtersOn,
     clearFilters,
     addTerm: (term) => {
+      const before = queryText();
       batch(() => {
-        setQueryText(withTerm(queryText(), term, matchCase()));
+        setQueryText(withTerm(before, term, matchCase()));
         // Clicking a value filters by it: finding would leave every line shown.
         setFilterMode(true);
       });
-      rememberQuery(queryText());
+      // A new query, made with a click: used. (The term already there, it is the query it was.)
+      if (queryText() !== before) recentQueries.remember(queryText());
     },
     onScreen,
     setOnScreen,

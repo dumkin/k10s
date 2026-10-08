@@ -4,12 +4,13 @@ import type { LogMessage, LogSpec, LogTarget } from "../../lib/backend";
 import { Tone } from "../../lib/backend";
 import { installHotkeys } from "../../lib/hotkeys";
 import type { DetailProps } from "../../registry/details";
+import { collectCommands } from "../../state/commands";
 import { setToasts, toasts } from "../../state/ui";
 import type { UIRow } from "../../state/view";
 import { LogsTab } from "../LogsTab";
 import { hover } from "./LogStrip";
 import { budget, timing } from "./LogViewer";
-import { recentQueries, setFilterMode, setFold, setPinned, setPretty, setUtc } from "./model";
+import { recentQueries, registerRecentQueryCommands, setFilterMode, setFold, setPinned, setPretty, setUtc } from "./model";
 
 // The log view as a whole: a pod's stream (the engine is a recorder), what the filters and the keys do to it.
 const h = vi.hoisted(() => ({
@@ -617,9 +618,11 @@ describe("log view", () => {
     expect(toasts().at(-1)).toMatchObject({ kind: "success", title: "Copied JSON", detail: undefined });
   });
 
-  it("offers the queries used lately on ↑ and from its icon: Enter applies the one highlighted, in place of the fields'", async () => {
+  it("offers the queries used lately on ↑ and from its icon: ↵ applies the one highlighted, in place of the fields'", async () => {
     // jsdom does not scroll: the highlight is shown by doing nothing.
     Element.prototype.scrollIntoView ??= () => {};
+    // Focus that leaves a field goes somewhere else in the window.
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     recentQueries.clear();
     const { root, s } = await mount();
     s.send({
@@ -645,42 +648,126 @@ describe("log view", () => {
       await tick();
       return e;
     };
-    const shown = () => [...root.querySelectorAll(".lq .recent-menu .opt .recent-text")].map((e) => e.textContent);
-    // Used: Enter, or the keyboard leaving the field.
+    const shown = () => [...document.querySelectorAll(".recent-menu .opt .recent-text")].map((e) => e.textContent);
+    // Used: ↵, or the keyboard leaving the field.
     await type("timeout");
     await press("Enter");
     await type("!healthz");
     input.blur();
     expect(recentQueries.list()).toEqual(["!healthz", "timeout"]);
+    // One that shows no lines (a typo, most likely) is left out: the keyboard leaves it for "Clear filters".
+    await type("timeuot");
+    input.blur();
+    root.querySelector<HTMLButtonElement>(".logv-empty .btn")!.click();
+    await tick();
+    expect([input.value, recentQueries.list()]).toEqual(["", ["!healthz", "timeout"]]);
 
-    // ↑: the most recent first; Enter applies the one highlighted, and the field keeps the keyboard.
+    // ↑: the most recent first; ↵ applies the one highlighted, and the field keeps the keyboard.
     await type("");
     expect((await press("ArrowUp")).defaultPrevented).toBe(true);
     expect(shown()).toEqual(["!healthz", "timeout"]);
     await press("ArrowDown");
     await press("Enter");
-    expect([input.value, lines(root), document.activeElement === input, root.querySelector(".recent-menu")]).toEqual(["timeout", ["POST /orders 500 timeout"], true, null]);
+    expect([input.value, lines(root), document.activeElement === input, document.querySelector(".recent-menu")]).toEqual(["timeout", ["POST /orders 500 timeout"], true, null]);
     expect(recentQueries.list()).toEqual(["timeout", "!healthz"]);
 
-    // While fields are suggested, ↑ goes through them; else it shows the queries holding what is typed (none: nothing).
+    // While fields are suggested, ↑ goes through them; else the queries holding what is typed, or all of them.
     await type("sta");
-    expect(root.querySelector(".lq-sg")).not.toBeNull();
+    expect(document.querySelector(".lq-sg")).not.toBeNull();
     await press("ArrowUp");
-    expect([root.querySelector(".lq-sg") !== null, root.querySelector(".lq .recent-menu")]).toEqual([true, null]);
+    expect([document.querySelector(".lq-sg") !== null, document.querySelector(".recent-menu")]).toEqual([true, null]);
     await press("Escape");
-    expect((await press("ArrowUp")).defaultPrevented).toBe(false);
-    expect(root.querySelector(".lq .recent-menu")).toBeNull();
+    await press("ArrowUp");
+    expect([document.querySelector(".lq-sg"), shown()]).toEqual([null, ["timeout", "!healthz"]]);
+    await press("Escape");
     await type("health");
     await press("ArrowUp");
     expect(shown()).toEqual(["!healthz"]);
     await press("Escape");
-    expect([root.querySelector(".recent-menu"), input.value]).toEqual([null, "health"]);
+    expect([document.querySelector(".recent-menu"), input.value]).toEqual([null, "health"]);
 
-    // The icon: every one, whatever is typed.
-    const icon = root.querySelector<HTMLElement>(".lq .recent-btn")!;
-    icon.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    // The icon: every one, whatever is typed; it puts the fields' suggestions away.
+    await type("sta");
+    root.querySelector(".lq .recent-btn")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
     await tick();
-    expect(shown()).toEqual(["timeout", "!healthz"]);
+    expect([document.querySelector(".lq-sg"), shown()]).toEqual([null, ["timeout", "!healthz"]]);
+  });
+
+  it("remembers a query cleared with Esc once it stood a while and showed lines, and one a click on a value made", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    recentQueries.clear();
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const { root, s } = await mount();
+      s.send({ t: "lines", l: [[0, 1000, '{"level":"info","msg":"request","path":"/healthz"}'], [0, 2000, '{"level":"info","msg":"request","path":"/api/orders"}']] });
+      await tick();
+      const input = root.querySelector<HTMLInputElement>(".lq-input")!;
+      const esc = async () => {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        await tick();
+      };
+      input.focus();
+      // Dropped at once, or showing no lines however long it stood: not remembered.
+      await query(root, "orders");
+      await esc();
+      await query(root, "ordres");
+      now += 2000;
+      await esc();
+      expect(recentQueries.list()).toEqual([]);
+      // Stood, and showed lines.
+      await query(root, "orders");
+      now += 2000;
+      await esc();
+      expect(recentQueries.list()).toEqual(["orders"]);
+
+      // A value clicked makes a new query: used. One the query holds already leaves it as it was: nothing new.
+      const pick = async (path: string, option: string) => {
+        const line = [...root.querySelectorAll(".lines .ln")].find((l) => l.querySelector(".txt")?.textContent === `request  path=${path}`)!;
+        line.querySelector<HTMLElement>(".f-click")!.click();
+        await tick();
+        [...document.querySelectorAll<HTMLButtonElement>(".menu .opt")].find((b) => b.textContent?.includes(option))!.click();
+        await tick();
+      };
+      await pick("/api/orders", "Show lines with this value");
+      expect([input.value, recentQueries.list()]).toEqual(["path=/api/orders", ["path=/api/orders", "orders"]]);
+      recentQueries.clear();
+      await pick("/api/orders", "Show lines with this value");
+      expect([input.value, recentQueries.list()]).toEqual(["path=/api/orders", []]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("filters a big log at once when the keyboard leaves the query, to tell whether it shows lines", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    recentQueries.clear();
+    const { root, s } = await mount();
+    // A big log: filtered once typing pauses.
+    s.send({ t: "lines", l: Array.from({ length: 30_000 }, (_, k): [number, number, string] => [0, 1000 + k, `line ${k}`]) });
+    await tick();
+    const input = root.querySelector<HTMLInputElement>(".lq-input")!;
+    // Left before typing paused: the typo shows nothing, and is left out.
+    for (const q of ["lien 7", "line 7"]) {
+      input.focus();
+      await query(root, q);
+      input.blur();
+    }
+    expect(recentQueries.list()).toEqual(["line 7"]);
+  });
+
+  it("forgets them all from the palette", async () => {
+    recentQueries.clear();
+    recentQueries.remember("timeout");
+    const off = registerRecentQueryCommands();
+    try {
+      const forget = collectCommands("").find((c) => c.id === "logs:forget-queries")!;
+      await forget.run({ additive: false });
+      expect(recentQueries.list()).toEqual([]);
+      expect(collectCommands("").some((c) => c.id === "logs:forget-queries")).toBe(false);
+    } finally {
+      off();
+    }
   });
 
   it("folds a long stack trace into its first lines, and unfolds it", async () => {

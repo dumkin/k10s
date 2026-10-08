@@ -6,6 +6,7 @@ import { cycleRegion } from "../lib/regions";
 import { installKeyHints } from "../lib/keyhints";
 import { breadcrumb, startWatchdog } from "../lib/watchdog";
 import "../details";
+import { registerRecentQueryCommands } from "../details/logs/model";
 import "../registry/actions";
 import "../registry/helmActions";
 import { registerBuiltinCommands } from "./builtinCommands";
@@ -63,6 +64,7 @@ export function initApp(): () => void {
     initMetrics();
     registerBuiltinCommands();
     onCleanup(registerCompareCommands());
+    onCleanup(registerRecentQueryCommands());
     onCleanup(startUpdates());
 
     // What the user did recently, attached to freeze reports in the log.

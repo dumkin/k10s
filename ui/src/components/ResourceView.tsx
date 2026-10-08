@@ -17,7 +17,6 @@ import {
   detailsFull,
   detailsOpen,
   filter,
-  forgetRecentFilter,
   goBack,
   goForward,
   marked,
@@ -35,6 +34,7 @@ import {
   setDetailsFull,
   setDetailsTab,
   setFilter,
+  setFilterShows,
   setHistoryRowName,
   setMarked,
   setNamespaces,
@@ -60,17 +60,23 @@ type ViewBinding = Binding & { anywhere?: boolean };
 
 export function ResourceView() {
   const model = createTableModel(mainView);
+  /** Whether the filter shows rows: one that shows none (a typo, most likely) is not remembered unless used with ↵. */
+  const showsRows = () => model.sorted().length > 0;
   let table: TableHandle | undefined;
   let filterInput: HTMLInputElement | undefined;
+  let filterBox: HTMLDivElement | undefined;
   /** The filters used lately, under the filter: ↑ in it, or a click on its icon. */
   const recent = createRecentMenu({
+    input: () => filterInput,
+    anchor: () => filterBox,
+    align: "right",
     list: recentFilters.list,
     text: filter,
     pick: (f) => {
-      replaceFilter(f);
+      setFilter(f);
       rememberFilter();
     },
-    forget: forgetRecentFilter,
+    forget: (f) => (f === null ? recentFilters.clear() : recentFilters.forget(f)),
     title: "Recent filters",
     empty: "Filters you use show up here.",
   });
@@ -241,8 +247,6 @@ export function ResourceView() {
         anywhere: true,
         run: (e) => {
           if (e.target === filterInput) {
-            // The menu of recent filters goes first: the field hands it its keys.
-            if (recent.shown()) return false;
             if (filter()) replaceFilter("");
             else filterInput?.blur();
             return;
@@ -261,7 +265,7 @@ export function ResourceView() {
         combo: "arrowdown",
         inInputs: true,
         run: (e) => {
-          if (e.target !== filterInput || recent.shown()) return false;
+          if (e.target !== filterInput) return false;
           filterInput?.blur();
           moveBy(1);
         },
@@ -337,6 +341,7 @@ export function ResourceView() {
     window.addEventListener("mouseup", onMouseUp);
     onCleanup(() => window.removeEventListener("mouseup", onMouseUp));
     setHistoryRowName((key) => mainView.rowByKey(key)?.n);
+    setFilterShows(showsRows);
     onCleanup(registerCommands(viewCommands));
     onCleanup(addHintPanel(() => <NamespaceKeysHint />));
   });
@@ -393,6 +398,8 @@ export function ResourceView() {
     }
     if (selectedKey() || marked().size)
       out.push({ id: "view:menu", title: "Actions menu", section: "View", icon: "more", keywords: ["context", "menu", "actions", "right click"], shortcut: "shift+f10", run: () => void openMenuByKey() });
+    if (recentFilters.list().length)
+      out.push({ id: "filters:forget", title: "Forget recent filters", section: "View", icon: "trash", keywords: ["history", "clear", "recent", "filter"], run: () => recentFilters.clear() });
     if (detailsOpen() || selectedKey())
       out.push({
         id: "details:full",
@@ -408,7 +415,17 @@ export function ResourceView() {
 
   // Right-click on a marked row acts on all visible marks; on any other row, on that row alone.
   // The menu's target is fixed; drop it once the view changes or another overlay takes over.
-  createEffect(on([resourceKey, selectedClusters, namespaces, paletteOpen, pickerOpen], () => setMenu(null), { defer: true }));
+  // So is the menu of recent filters: what it would apply was for the view being left.
+  createEffect(
+    on(
+      [resourceKey, selectedClusters, namespaces, paletteOpen, pickerOpen],
+      () => {
+        setMenu(null);
+        recent.hide();
+      },
+      { defer: true },
+    ),
+  );
 
   const onContextMenu = (row: UIRow, e: MouseEvent) => {
     const rows = marked().has(row.key) ? targets() : [row];
@@ -452,24 +469,8 @@ export function ResourceView() {
               )}
             </Show>
           </div>
-          <div class="filter search-field" data-hint={keyOf("table.filter")} data-hint-ctx="table">
-            <button
-              class="recent-btn"
-              tabIndex={-1}
-              title={`Recent filters (${comboLabel("arrowup")})`}
-              aria-label="Recent filters"
-              aria-haspopup="listbox"
-              aria-expanded={recent.shown()}
-              // The field keeps the keyboard (or gets it): the menu's keys go through it.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                filterInput?.focus();
-                recent.toggle();
-              }}
-            >
-              <Icon name="filter" size={13} />
-              <Icon name="chevron-down" size={9} strokeWidth={2.2} />
-            </button>
+          <div ref={filterBox} class="filter search-field" data-hint={keyOf("table.filter")} data-hint-ctx="table">
+            <recent.Button icon="filter" size={13} />
             <input
               ref={filterInput}
               class="input"
@@ -477,36 +478,24 @@ export function ResourceView() {
               aria-label="Filter"
               role="combobox"
               aria-expanded={recent.shown()}
+              aria-controls={recent.shown() ? recent.listId : undefined}
+              aria-activedescendant={recent.activeId()}
               aria-autocomplete="list"
               title={FILTER_HELP}
               value={filter()}
-              onInput={(e) => {
-                setFilter(e.currentTarget.value);
-                recent.typed();
-              }}
+              onInput={(e) => setFilter(e.currentTarget.value)}
               onKeyDown={(e) => {
-                if (recent.key(e)) return;
-                const plain = !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-                // ↑, as in a shell: the filters used lately — those holding what is typed.
-                if (e.key === "ArrowUp" && plain && recent.show()) e.preventDefault();
-                else if (e.key === "Enter" && plain) rememberFilter();
+                // ↑, as in a shell: the filters used lately.
+                if (recent.keyDown(e)) return;
+                if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && !e.metaKey && !e.ctrlKey && !e.altKey) rememberFilter();
               }}
-              // A filter the keyboard leaves was used: it is remembered.
-              onBlur={() => {
-                recent.hide();
-                rememberFilter();
-              }}
+              // The keyboard left the filter: it was used, if it shows rows. (Not when the window did: it is still in the filter there.)
+              onBlur={() => document.hasFocus() && showsRows() && rememberFilter()}
               spellcheck={false}
             />
             <Show when={filter()} fallback={<Kbd id="table.filter" />}>
-              <button
-                class="clear"
-                onClick={() => {
-                  recent.hide();
-                  replaceFilter("");
-                }}
-                aria-label="Clear the filter"
-              >
+              {/* The field keeps the keyboard: clearing a filter typed a moment ago is not leaving it (it is not remembered). */}
+              <button class="clear" onMouseDown={(e) => e.preventDefault()} onClick={() => replaceFilter("")} aria-label="Clear the filter">
                 <Icon name="x" size={12} />
               </button>
             </Show>

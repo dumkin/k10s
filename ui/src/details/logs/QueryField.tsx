@@ -3,14 +3,14 @@ import { Icon } from "../../components/Icon";
 import { Highlight } from "../../components/Popover";
 import { createRecentMenu } from "../../components/RecentMenu";
 import { count } from "../../lib/format";
-import { comboLabel, keyed } from "../../lib/hotkeys";
+import { keyed } from "../../lib/hotkeys";
 import { keyOf } from "../../lib/keymap";
 import { applyAt, type Spot, spotAt } from "../../lib/logs/complete";
 import { describeQuery, type Query } from "../../lib/logs/query";
-import { KEPT_MS } from "../../lib/recent";
+import { recentUse } from "../../lib/recent";
 import { indexAtPos } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
-import { filterMode, matchCase, recentQueries, regexMode, rememberQuery, setFilterMode, setMatchCase, setRegexMode } from "./model";
+import { filterMode, matchCase, recentQueries, regexMode, setFilterMode, setMatchCase, setRegexMode } from "./model";
 import { Catalog, type Suggestion } from "./suggest";
 
 const HELP = [
@@ -44,46 +44,41 @@ export function QueryField(props: {
   flush: () => void;
 }) {
   const c = props.ctx;
+  let root!: HTMLDivElement;
   let input!: HTMLInputElement;
   let overlay!: HTMLDivElement;
   let box!: HTMLDivElement;
   let list: HTMLDivElement | undefined;
   const [focused, setFocused] = createSignal(false);
-  /** When the query got the text it has here (typed, taken from a menu). */
-  let since = 0;
-  /** The query as it stood when it was forgotten from the recent ones: it is not remembered again while it stays so. */
-  let forgotten: string | null = null;
-  /** The query was used (Enter, the keyboard left it): it is remembered. */
-  const remember = () => {
-    if (props.text() !== forgotten) rememberQuery(props.text());
-  };
-  /** Puts `text` in the field, the caret at its end. */
-  const put = (text: string) => {
-    since = Date.now();
-    forgotten = null;
+  /** How the query is used here, for the recent ones. */
+  const use = recentUse(recentQueries);
+  /** Puts `text` in the field (typed for the user: a suggestion taken, an entry picked), the caret at `caret`. */
+  const put = (text: string, caret = text.length) => {
+    use.changed();
     props.setText(text);
     input.value = text;
-    input.setSelectionRange(text.length, text.length);
+    input.setSelectionRange(caret, caret);
     sync();
   };
   /** The queries used lately: ↑ in the query, or a click on its icon. */
   const recent = createRecentMenu({
+    input: () => input,
+    anchor: () => root,
+    align: "left",
     list: recentQueries.list,
     text: () => props.text(),
     pick: (q) => {
       put(q);
       props.flush();
-      rememberQuery(q);
+      use.used(q);
     },
-    forget: (q) => {
-      if (q === null) recentQueries.clear();
-      else recentQueries.forget(q);
-      // The query standing goes with it: leaving the field must not bring it back.
-      if (q === null || q === props.text().trim()) forgotten = props.text();
-    },
+    forget: (q) => (q === null ? recentQueries.clear() : recentQueries.forget(q)),
     title: "Recent queries",
     empty: "Queries you use show up here.",
+    onShow: () => setSg(null),
   });
+  /** What the query shows: lines, or matches when finding. One that shows none (a typo, most likely) is not remembered unless used with ↵. */
+  const showsLines = () => (filterMode() ? c.shown().length > 0 : (c.matches()?.length ?? 0) > 0);
   /** Width of a character of the input (monospaced): the suggestions open under what they complete. */
   let charW = 7;
   onMount(() => {
@@ -164,12 +159,8 @@ export function QueryField(props: {
     const it = s?.items[k];
     if (!s || !it) return;
     const r = applyAt(input.value, s.spot, it.text);
-    since = Date.now();
     setSg(null);
-    props.setText(r.input);
-    input.value = r.input;
-    input.setSelectionRange(r.caret, r.caret);
-    sync();
+    put(r.input, r.caret);
     // A field's name: its values next.
     if (s.spot.kind === "key") suggest(true);
   };
@@ -182,7 +173,6 @@ export function QueryField(props: {
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if (recent.key(e)) return;
     const s = sg();
     if (s) {
       const ctrl = e.ctrlKey && !e.metaKey && !e.altKey;
@@ -217,16 +207,13 @@ export function QueryField(props: {
         return;
       }
     }
-    // ↑, as in a shell: the queries used lately — those holding what is typed.
-    if (e.key === "ArrowUp" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
-      if (recent.show()) e.preventDefault();
-      return;
-    }
+    // ↑, as in a shell: the queries used lately.
+    if (recent.keyDown(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       setSg(null);
       props.flush();
-      remember();
+      use.used(props.text());
       // Finding: Enter goes to the next match (⇧Enter the previous); filtering, it hands the keys back to the lines.
       if (finding()) props.jump(e.shiftKey ? -1 : 1);
       else input.blur();
@@ -235,9 +222,9 @@ export function QueryField(props: {
     if (e.key === "Escape") {
       e.preventDefault();
       if (props.text()) {
-        // A query that stood long enough to be looked at was used; one typed and dropped at once was not.
-        if (Date.now() - since >= KEPT_MS) remember();
-        props.setText("");
+        // One that stood a while and showed something was used; one typed and dropped at once was not.
+        use.dropped(props.text(), showsLines());
+        put("");
       } else input.blur();
     }
   };
@@ -249,30 +236,14 @@ export function QueryField(props: {
 
   return (
     <div
+      ref={root}
       class="lq"
       classList={{ invalid: !!props.query().error, focused: focused(), finding: !filterMode() }}
       data-hint={keyOf("logs.find")}
       data-hint-ctx="details"
       title={sg() || recent.shown() ? undefined : props.query().terms.length || props.query().error ? describeQuery(props.query()) : HELP}
     >
-      <button
-        class="recent-btn"
-        tabIndex={-1}
-        title={`Recent queries (${comboLabel("arrowup")})`}
-        aria-label="Recent queries"
-        aria-haspopup="listbox"
-        aria-expanded={recent.shown()}
-        // The field keeps the keyboard (or gets it): the menu's keys go through it.
-        onMouseDown={(e) => {
-          e.preventDefault();
-          input.focus();
-          setSg(null);
-          recent.toggle();
-        }}
-      >
-        <Icon name={filterMode() ? "filter" : "search"} size={12} />
-        <Icon name="chevron-down" size={8} strokeWidth={2.2} />
-      </button>
+      <recent.Button icon={filterMode() ? "filter" : "search"} size={12} />
       <div class="lq-box" ref={box}>
         <div class="lq-overlay" ref={overlay} aria-hidden="true">
           <For each={spans()}>{(s) => (s.kind ? <span class={`q-${s.kind}`}>{s.text}</span> : s.text)}</For>
@@ -287,15 +258,15 @@ export function QueryField(props: {
           autocomplete="off"
           role="combobox"
           aria-expanded={!!sg() || recent.shown()}
+          aria-controls={recent.shown() ? recent.listId : undefined}
+          aria-activedescendant={recent.activeId()}
           aria-autocomplete="list"
           placeholder={filterMode() ? "Filter: words, !word, key:value, /regex/" : "Find: words, !word, key:value, /regex/"}
           value={props.text()}
           onInput={(e) => {
-            since = Date.now();
-            forgotten = null;
+            use.changed();
             props.setText(e.currentTarget.value);
             sync();
-            recent.typed();
             suggest();
           }}
           onKeyDown={onKey}
@@ -307,8 +278,11 @@ export function QueryField(props: {
           onBlur={() => {
             setFocused(false);
             setSg(null);
-            recent.hide();
-            remember();
+            // The keyboard left the query: it was used, if it shows lines (a big log is filtered now to tell).
+            // Not when the window did: the keyboard is still in the query there.
+            if (!document.hasFocus()) return;
+            props.flush();
+            if (showsLines()) use.used(props.text());
           }}
         />
         <Show when={sg()}>

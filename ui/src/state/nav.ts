@@ -5,7 +5,7 @@ import type { ObjectRef, ResourceInfo } from "../lib/backend";
 import { naturalCompare } from "../lib/clusters";
 import { isValidNamespace, normalizeNamespace } from "../lib/k8s";
 import { arrayOf, isNumber, isString, persisted, recordOf } from "../lib/persist";
-import { KEPT_MS, recentList } from "../lib/recent";
+import { recentList, recentUse } from "../lib/recent";
 import { globalMemo } from "../lib/reactive";
 import { catalogEntry, titleFor } from "../registry/catalog";
 import { contexts, discoveredResources, selectedClusters, zoneFamilyOf } from "./clusters";
@@ -24,39 +24,37 @@ const [filterText, setFilterText] = createSignal("");
 export const filter = filterText;
 /** The table's filters used lately, of every resource: `app=web` or `payments` serve deployments as well as pods. */
 export const recentFilters = recentList("recentFilters", 20);
-/** When the filter got the text it has. */
-let filterSince = 0;
-/** The filter was forgotten from the recent ones as it stands: it is not remembered again until it changes. */
-let filterForgotten = false;
+const filterUse = recentUse(recentFilters);
+/** Whether the table shows rows: a filter that shows none (a typo, most likely) is not remembered for having stood. */
+let filterShows: () => boolean = () => true;
 
-/** Sets the filter as it is typed. */
+/** Lets the table tell whether the filter shows rows. */
+export function setFilterShows(fn: () => boolean) {
+  filterShows = fn;
+}
+
+/** Sets the filter: typed, or picked from the recent ones. */
 export function setFilter(text: string) {
-  filterSince = Date.now();
-  filterForgotten = false;
+  filterUse.changed();
   setFilterText(text);
 }
 
-/** The filter was used (the keyboard left it, Enter): it is remembered. */
+/** The filter was used (↵, the keyboard left the field, it was picked): it is remembered. */
 export function rememberFilter() {
-  if (!filterForgotten) recentFilters.remember(filter());
-}
-
-/** Forgets a recent filter (null: all of them). The filter standing goes with it: leaving it must not bring it back. */
-export function forgetRecentFilter(text: string | null) {
-  if (text === null) recentFilters.clear();
-  else recentFilters.forget(text);
-  if (text === null || text === filter().trim()) filterForgotten = true;
+  filterUse.used(filter());
 }
 
 /**
- * Clears the filter, or puts another one in its place (one picked, the one of a view gone back to). The filter it
- * replaces is remembered if it stood long enough to be looked at (see `KEPT_MS`).
+ * Puts another filter in place of this one: none (Esc, ×), or another view's (another resource; `restored`: back /
+ * forward). The one it replaces is remembered if it stood a while and showed rows.
  */
-export function replaceFilter(text: string) {
+export function replaceFilter(text: string, restored = false) {
   const cur = filter();
   if (cur === text) return;
-  if (cur && Date.now() - filterSince >= KEPT_MS) rememberFilter();
-  setFilter(text);
+  if (cur) filterUse.dropped(cur, filterShows());
+  if (restored) filterUse.restored();
+  else filterUse.changed();
+  setFilterText(text);
 }
 
 export const [selectedKey, setSelectedKey] = createSignal<string | null>(null);
@@ -83,8 +81,9 @@ export function resourceTitle(key: string): string {
 /** Switches the table to another resource with a clean slate (no filter, selection, marks or details). */
 function switchResource(key: string) {
   batch(() => {
-    setResourceKeyRaw(key);
+    // First: what the table shows is still the filter's.
     replaceFilter("");
+    setResourceKeyRaw(key);
     setSelectedKey(null);
     setMarked(new Set<string>());
     setDetailsOpen(false);
@@ -394,9 +393,9 @@ function pushHistory() {
 
 function restore(s: NavState) {
   batch(() => {
+    replaceFilter(s.filter, true);
     setResourceKeyRaw(s.resource);
     if (!sameList(s.namespaces, namespaces())) setNamespacesRaw(s.namespaces);
-    replaceFilter(s.filter);
     setMarked(new Set<string>());
     setPendingReveal(null);
     setSelectedKey(s.selected);

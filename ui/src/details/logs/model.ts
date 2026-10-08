@@ -3,6 +3,7 @@ import type { LogLine } from "../../lib/backend";
 import { humanDuration } from "../../lib/format";
 import { arrayOf, isBoolean, isNumber, isString, persisted, setting } from "../../lib/persist";
 import { recentList } from "../../lib/recent";
+import { registerCommands } from "../../state/commands";
 import { type FieldValue, Level, structure, type Structured } from "../../lib/logs/parse";
 import { patternOf, PatternIds } from "../../lib/logs/patterns";
 import { compile, isEmpty, type Query, queryKey, type Subject } from "../../lib/logs/query";
@@ -36,6 +37,15 @@ export const [regexMode, setRegexMode] = persisted("logs.regex", false, isBoolea
 export const [filterMode, setFilterMode] = persisted("logs.filterMode", true, isBoolean);
 /** Queries used lately, in any log (↑ in the query, or a click on its icon). */
 export const recentQueries = recentList("logs.queries", 30);
+
+/** The palette's way to forget them all (the menu's "Forget all" is a click). */
+export function registerRecentQueryCommands(): () => void {
+  return registerCommands(() =>
+    recentQueries.list().length
+      ? [{ id: "logs:forget-queries", title: "Forget recent log queries", section: "Logs", icon: "trash", keywords: ["history", "clear", "recent", "query", "search"], run: () => recentQueries.clear() }]
+      : [],
+  );
+}
 /** Fields shown as columns (of the lines that have them). */
 export const [pinned, setPinned] = setting("logs.columns", [] as string[], arrayOf(isString));
 // "All lines" is deliberately not remembered: picked once for a pod, it would pull the whole history of every
@@ -43,9 +53,6 @@ export const [pinned, setPinned] = setting("logs.columns", [] as string[], array
 export const [tail, setTail] = setting("logs.tail", 1000, (v): v is number => TAILS.includes(v as number));
 /** A stretch of time to read instead of a number of lines (seconds; 0: off). */
 export const [since, setSince] = setting("logs.since", 0, (v): v is number => isNumber(v) && (v === 0 || SINCES.includes(v)));
-
-/** Remembers a query used (the most recent first, without repeats). */
-export const rememberQuery = (q: string) => recentQueries.remember(q);
 
 export function togglePinned(key: string) {
   setPinned(pinned().includes(key) ? pinned().filter((k) => k !== key) : [...pinned(), key]);
