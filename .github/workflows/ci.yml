@@ -98,6 +98,30 @@ jobs:
       - name: Licenses of the npm packages the app ships
         run: node scripts/third-party-notices.mjs --check
 
+  linux-metadata:
+    name: Linux metadata (AppStream ${{ matrix.appstream }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest AppStream of the distributions k10s runs on, and the one the release builds check the packages
+          # with: a warning fails a release after its builds.
+          - os: ubuntu-22.04
+            appstream: "0.15"
+          # A newer one, which checks more.
+          - os: ubuntu-24.04
+            appstream: "1.0"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install appstreamcli
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream
+      # No network checks: the screenshots' addresses name the version's tag, which comes after the release commit.
+      - name: AppStream metadata
+        run: appstreamcli validate --no-net --explain packaging/linux/io.dumkin.k10s.appdata.xml
+
   workflows:
     name: Workflows
     runs-on: ubuntu-24.04

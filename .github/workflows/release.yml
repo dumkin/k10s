@@ -165,6 +165,23 @@ jobs:
           retryAttempts: 1
           args: --target ${{ matrix.target }} --config release.conf.json
 
+      # The AppStream metadata (packaging/linux) in each Linux package, valid with the desktop file the bundler made,
+      # which must pass desktop-file-validate for the AppImage catalog.
+      - name: Check the Linux packages
+        if: runner.os == 'Linux'
+        working-directory: ${{ runner.temp }}
+        env:
+          BUNDLE: ${{ github.workspace }}/target/${{ matrix.target }}/release/bundle
+          METAINFO: usr/share/metainfo/io.dumkin.k10s.appdata.xml
+        run: |
+          sudo apt-get install -y appstream desktop-file-utils rpm
+          dpkg -c "$BUNDLE"/deb/*.deb | grep -F "$METAINFO"
+          rpm -qlp "$BUNDLE"/rpm/*.rpm | grep -Fx "/$METAINFO"
+          for appimage in "$BUNDLE"/appimage/*.AppImage; do "$appimage" --appimage-extract > /dev/null; done
+          ls -l "squashfs-root/$METAINFO"
+          desktop-file-validate squashfs-root/*.desktop
+          appstreamcli validate-tree --no-net --explain squashfs-root
+
   feed:
     name: Check the update feed
     needs: [prepare, build]
