@@ -39,8 +39,8 @@ const KEYED = /(?:"(?:level|lvl|severity|levelname|level_name|loglevel|log_level
 // klog and glog (I1004 10:42:01.123456), Ruby's Logger (E, [2024-…).
 const PREFIX = /^([DIWEF])(?:\d{4} \d{2}:\d{2}:\d{2}|, \[)/;
 const PREFIX_LEVEL: Record<string, Level> = { D: 2, I: 3, W: 4, E: 5, F: 5 };
-// Lines that are errors by what they start with.
-const STARTS = /^(?:panic: |fatal error: |Exception in thread |Traceback \(most recent call last\)|Unhandled (?:exception|rejection)|Uncaught )/;
+// Lines that are errors by what they start with (Go's report of a signal that crashed it too: "SIGSEGV: …").
+const STARTS = /^(?:panic: |fatal error: |SIG(?:QUIT|ILL|TRAP|ABRT|BUS|FPE|SEGV|SYS|EMT|STKFLT): |Exception in thread |Traceback \(most recent call last\)|Unhandled (?:exception|rejection)|Uncaught )/;
 // A level in brackets or between bars, any case: [error], <warn>, | INFO |.
 const TAGGED = /[[<(|]\s*(trace|trc|debug|dbg|info|inf|notice|note|warn|warning|wrn|error|err|fatal|crit|critical|panic|alert|emerg|severe|verbose)\s*[\]>)|]/i;
 // A level in capitals anywhere in the head (logrus's ERRO[0000] and Postgres's LOG: too). No lookbehind (WebKit
@@ -219,24 +219,38 @@ export function structure(text: string): Structured | null {
 // ------------------------------------------------------------------------------------------ multi-line entries
 
 const INDENTED = /^[ \t]+\S/;
-// Lines that are a stack trace's whatever their indentation.
-const STACK = /^(?:Caused by: |Suppressed: |\.\.\. \d+ (?:more|common frames omitted)|goroutine \d+ \[|\[recovered\]|created by |During handling of the above exception|The above exception was the direct cause|Traceback \(most recent call last\):)/;
-// Frames that say a stack trace has begun: Java's and JavaScript's "at …", Python's "File …".
+// Go's goroutine header ("goroutine 7 [select]:"), with the fields a fatal error and GOTRACEBACK=system add to it
+// ("goroutine 7 gp=0xc000… m=nil [select]:").
+const GOROUTINE = /^goroutine \d+ (?:[a-z]+=\w+ ){0,4}\[/;
+// Lines that are a stack trace's whatever their indentation (Go's goroutine headers too: GOROUTINE's in one test).
+const STACK = /^(?:Caused by: |Suppressed: |\.\.\. \d+ (?:more|common frames omitted)|goroutine \d+ (?:[a-z]+=\w+ ){0,4}\[|\[recovered\]|created by \S+(?: in goroutine \d+)?$|runtime stack:$|\[signal SIG|During handling of the above exception|The above exception was the direct cause|Traceback \(most recent call last\):)/;
+// Frames that say a stack trace has begun: Java's and JavaScript's "at …", Python's "File …"…
 const FRAME = /^[ \t]+(?:at |File ")/;
+// …and Go's file and line ("\t/src/main.go:12 +0x1d"), with the frame's registers under GOTRACEBACK=system.
+const GO_FRAME = /^\t\S+\.(?:go|s):\d+(?: \+0x[\da-f]+)?(?: fp=0x[\da-f]+ sp=0x[\da-f]+ pc=0x[\da-f]+)?$/;
 // An exception's first line, logged right after the line that reports it (Java's logback, Node).
 const EXCEPTION = /^(?:(?:[a-z_$][\w$]*\.)+[A-Z][\w$]*(?:Exception|Error|Throwable)|[A-Z]\w*(?:Error|Exception))(?::|$)/;
 // Lines that start an entry of their own however close they come: a timestamp, a level, a JSON object, a pair.
 const ENTRY_HEAD = /^(?:\{|\[?\d{4}[-/]\d{2}[-/]\d{2}|\[?\d{2}:\d{2}:\d{2}|[IWEF]\d{4} |\[?\s*(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|PANIC|CRITICAL|NOTICE)\b|(?:time|ts|level|lvl|msg)=)/;
 /** Lines after which unindented lines (Go's function names, Python's final error) belong to the stack trace too. */
-const STACK_START = /^(?:panic: |fatal error: |Exception in thread |Traceback \(most recent call last\):|goroutine \d+ \[)/;
+const STACK_START = /^(?:panic: |fatal error: |SIG(?:QUIT|ILL|TRAP|ABRT|BUS|FPE|SEGV|SYS|EMT|STKFLT): |Exception in thread |Traceback \(most recent call last\):)/;
 
 /** Continuation lines further apart than this from the line before them start entries of their own. */
 export const CONTINUATION_MS = 1000;
 /** An exception's first line belongs to the line before it only when written right after it. */
 const EXCEPTION_MS = 5;
 
-/** Whether a line that starts an entry starts a stack trace (unindented lines may follow in it). */
-export const startsStack = (plain: string) => STACK_START.test(plain);
+// (Asked of every entry's first line: one test.)
+const STACK_HEAD = new RegExp([STACK_START, STACK, GO_FRAME].map((r) => r.source).join("|"));
+
+/**
+ * Whether a line that starts an entry starts a stack trace (unindented lines may follow in it): its first line, or a
+ * line of its own (a goroutine's header, a frame's file) when the entry begins inside one — read from its middle on.
+ */
+export const startsStack = (plain: string) => STACK_HEAD.test(plain);
+
+/** Whether a line is Go's goroutine header: where a crash report too long for one entry goes on in the next. */
+export const isGoroutine = (plain: string) => GOROUTINE.test(plain);
 
 /**
  * How a line relates to the entry before it from the same source, written `ms` before it (null: unknown):
@@ -248,7 +262,7 @@ export function follows(plain: string, inStack: boolean, ms: number | null): 0 |
   // JSON lines are entries of their own (indented or not): structured logs have one entry per line.
   if (plain.charCodeAt(0) === 123 || (plain.trimStart().charCodeAt(0) === 123 && plain.trimEnd().endsWith("}"))) return 0;
   if (STACK.test(plain)) return 2;
-  if (INDENTED.test(plain)) return FRAME.test(plain) ? 2 : 1;
+  if (INDENTED.test(plain)) return FRAME.test(plain) || GO_FRAME.test(plain) ? 2 : 1;
   if (inStack) return ENTRY_HEAD.test(plain) ? 0 : 1;
   if (EXCEPTION.test(plain) && (ms === null || ms <= EXCEPTION_MS)) return 2;
   return 0;

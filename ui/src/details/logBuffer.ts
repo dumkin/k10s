@@ -1,14 +1,20 @@
 import { hasAnsi, stripAnsi } from "../lib/ansi";
 import type { LogLine, LogTarget } from "../lib/backend";
-import { follows, Level, levelOf, startsStack } from "../lib/logs/parse";
+import { follows, isGoroutine, Level, levelOf, startsStack } from "../lib/logs/parse";
 
 /** The buffer keeps at most this many entries… */
 export const MAX_LINES = 100_000;
 /** …and about this much text (UTF-16 code units, plus bookkeeping per entry); the oldest entries go first. */
 export const MAX_BYTES = 64 * 1024 * 1024;
 const LINE_OVERHEAD = 64;
-/** An entry takes at most this many continuation lines; more start an entry of their own. */
+const MORE_OVERHEAD = 16;
+/** An entry takes at most this many continuation lines; more start an entry of their own… */
 export const MAX_MORE = 400;
+/**
+ * …but a stack trace takes up to this many more to get to a goroutine's header: a Go crash report too long for one
+ * entry goes on in the next from a goroutine on (Go prints a goroutine in about 200 lines at most).
+ */
+export const MAX_TAIL = 256;
 /** A buffer whose lines are being read may grow to this many times its budget before those lines are dropped too. */
 export const HOLD_OVER = 1.5;
 
@@ -65,7 +71,7 @@ export const ALL: Filter = { key: "", test: () => true };
 
 function size(l: Line): number {
   let n = l.text.length + LINE_OVERHEAD;
-  if (l.more) for (const m of l.more) n += m.length + 16;
+  if (l.more) for (const m of l.more) n += m.length + MORE_OVERHEAD;
   if (l.lower !== undefined && l.lower !== l.text) n += l.lower.length;
   return n;
 }
@@ -272,12 +278,18 @@ export class LogBuffer {
     const ansi = hasAnsi(text);
     const plain = ansi ? stripAnsi(text) : text;
     const prev = last.get(i);
-    // The source's last entry: in this batch (no position yet), or still in the buffer.
-    if (prev && !prev.marker && (prev.pos < 0 || prev.pos >= this.dropped) && (prev.more?.length ?? 0) < MAX_MORE) {
+    const n = prev?.more?.length ?? 0;
+    /** The stack trace the line is more of, in an entry of its own: the one it was in is full. */
+    let goesOn: Line | undefined;
+    // The source's last entry: in this batch (no position yet), or still in the buffer — full, if it is a stack trace.
+    if (prev && !prev.marker && (prev.pos < 0 || prev.pos >= this.dropped) && (n < MAX_MORE || prev.stack)) {
       const before = lastTs.get(i);
       const how = follows(plain, !!prev.stack, ts !== null && before != null ? ts - before : null);
-      if (how) {
-        this.bytes -= size(prev);
+      if (how && n >= MAX_MORE && (n >= MAX_MORE + MAX_TAIL || isGoroutine(plain))) goesOn = prev;
+      else if (how) {
+        // (What it took grows by the line, and its lower-case copy goes: see `size`.)
+        if (prev.lower !== undefined && prev.lower !== prev.text) this.bytes -= prev.lower.length;
+        this.bytes += text.length + MORE_OVERHEAD;
         (prev.more ??= []).push(text);
         (prev.moreWidth ??= []).push(plain.length);
         if (how === 2) prev.stack = true;
@@ -287,13 +299,16 @@ export class LogBuffer {
           prev.pat = undefined;
         }
         prev.lower = undefined;
-        this.bytes += size(prev);
         if (ts !== null) lastTs.set(i, ts);
         return prev;
       }
     }
     const l: Line = { i, ts, key, text, width: plain.length, lvl: levelOf(plain), ansi, pos: -1, seq: arrived ? this.seq++ : -1 };
-    if (startsStack(plain)) l.stack = true;
+    // A stack trace (or more of one) is an error unless it says otherwise; more of one is at its level.
+    if (goesOn || startsStack(plain)) {
+      l.stack = true;
+      l.lvl = goesOn?.lvl || l.lvl || Level.Error;
+    }
     incoming.push(l);
     this.bytes += size(l);
     this.counts[i] = (this.counts[i] ?? 0) + 1;

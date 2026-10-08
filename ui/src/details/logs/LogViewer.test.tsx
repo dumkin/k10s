@@ -782,6 +782,23 @@ describe("log view", () => {
     await tick();
     expect(root.querySelectorAll(".lines .ln.cont")).toHaveLength(31);
   });
+
+  it("draws the lines that join a stack trace drawn already, at the level they give it", async () => {
+    const { root, s } = await mount();
+    const rows = () => [...root.querySelectorAll(".lines .ln")].map((r) => `${r.classList.contains("lvl-5") ? "!" : ""}${r.classList.contains("fold") ? "fold" : (r.querySelector(".txt")?.textContent ?? "")}`);
+    s.send({ t: "lines", l: [[0, 1000, "worker stopped"]] });
+    await tick();
+    expect(rows()).toEqual(["worker stopped"]);
+    // Its frames come with the next lines: they make it an error.
+    s.send({ t: "lines", l: [[0, 1000, "\tat com.acme.Worker.run(Worker.java:12)"]] });
+    await tick();
+    expect(rows()).toEqual(["!worker stopped", "!\tat com.acme.Worker.run(Worker.java:12)"]);
+    // Long enough to fold: its first lines, and how many more.
+    s.send({ t: "lines", l: Array.from({ length: 20 }, (_, k): [number, number, string] => [0, 1001, `\tat com.acme.F${k}.run(F.java:${k})`]) });
+    await tick();
+    expect(rows()).toHaveLength(1 + 6 + 1);
+    expect(root.querySelector(".lines .ln.fold")!.textContent).toContain("15 more lines");
+  });
 });
 
 describe("log view under a flood of lines", () => {

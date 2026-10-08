@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { follows, Level, levelOf, logfmtOf, startsStack, structure } from "./parse";
+import { follows, isGoroutine, Level, levelOf, logfmtOf, startsStack, structure } from "./parse";
 
 const { None, Trace, Debug, Info, Warn, Error } = Level;
 
@@ -103,6 +103,31 @@ describe("follows", () => {
     expect(follows("{}", true, 0)).toBe(0);
     expect(follows("a new line", false, 0)).toBe(0);
     expect(follows("", false, 0)).toBe(0);
+  });
+
+  it("knows Go's crash reports: goroutine headers with their fields, frames' files with their registers", () => {
+    // Go 1.23 on a fatal error, and with GOTRACEBACK=system.
+    expect(follows("goroutine 7 gp=0xc000102a80 m=nil [IO wait]:", false, 0)).toBe(2);
+    expect(follows("goroutine 1 gp=0xc000002380 m=0 mp=0x1d5a6c0 [running]:", false, 0)).toBe(2);
+    expect(follows("goroutine 5 [select, 2 minutes]:", false, 0)).toBe(2);
+    expect(follows("\t/usr/local/go/src/runtime/proc.go:435 +0xce fp=0xc00008be30 sp=0xc00008be10 pc=0x47e2ce", false, 0)).toBe(2);
+    expect(follows("\t/usr/local/go/src/runtime/asm_amd64.s:1700 +0x1", false, 0)).toBe(2);
+    expect(follows("\t/src/internal/shop/cart.go:42", false, 0)).toBe(2);
+    expect(follows("runtime stack:", false, 0)).toBe(2);
+    expect(follows("[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x4a2b3c]", false, 0)).toBe(2);
+    expect(follows("created by example.com/shop/internal/queue.Start in goroutine 1", false, 0)).toBe(2);
+    expect(follows("created by main.main", false, 0)).toBe(2);
+    // A tab and a port is no frame; who created what is no goroutine's creator.
+    expect(follows("\tlocalhost:8080", false, 0)).toBe(1);
+    expect(follows("created by admin: order 42", false, 0)).toBe(0);
+    for (const head of ["fatal error: concurrent map writes", "SIGQUIT: quit", "goroutine 7 gp=0xc000102a80 m=nil [IO wait]:", "\t/src/main.go:12 +0x1d", "created by main.main in goroutine 1"]) expect(startsStack(head), head).toBe(true);
+    expect(levelOf("SIGSEGV: segmentation violation")).toBe(Error);
+    // A frame's function is unindented: more of the stack trace only once one has begun.
+    expect(follows("example.com/shop/internal/queue.(*Worker).run(0xc0001a2000)", false, 0)).toBe(0);
+    expect(follows("example.com/shop/internal/queue.(*Worker).run(0xc0001a2000)", true, 0)).toBe(1);
+    expect(startsStack("main.main()")).toBe(false);
+    expect(isGoroutine("goroutine 7 gp=0xc000102a80 m=nil [IO wait]:")).toBe(true);
+    expect(isGoroutine("goroutines: 7")).toBe(false);
   });
 
   it("keeps unindented lines in a stack trace until one starts an entry", () => {

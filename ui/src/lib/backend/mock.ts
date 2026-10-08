@@ -1099,9 +1099,12 @@ export class MockBackend implements Backend {
         const t = live.get(i)!;
         if (!crashy(t) || rnd() > every / 400 / 120 || now - started < 8000) continue;
         const died = now - late(i);
-        lines.push([i, died, "fatal error: runtime: out of memory"], [i, died, ""], [i, died, "goroutine 1 [running]:"], [i, died, "runtime.throw({0x1b2f3a0, 0x16})"], [i, died, "\t/usr/local/go/src/runtime/panic.go:1047 +0x5d"]);
+        // Out of memory, or a fatal error and its report of every goroutine.
+        const oom = rnd() < 0.5;
+        if (oom) lines.push([i, died, "fatal error: runtime: out of memory"], [i, died, ""], [i, died, "goroutine 1 [running]:"], [i, died, "runtime.throw({0x1b2f3a0, 0x16})"], [i, died, "\t/usr/local/go/src/runtime/panic.go:1047 +0x5d"]);
+        else goCrash(t.container).forEach((text, k) => lines.push([i, died + Math.floor(k / 400), text]));
         down.set(i, now + 9000);
-        const message = "container terminated: OOMKilled (exit code 137)";
+        const message = oom ? "container terminated: OOMKilled (exit code 137)" : "container terminated: Error (exit code 2)";
         setTimeout(() => !closed && cb({ t: "state", i, state: "ended", message }), 300);
         setTimeout(() => !closed && cb({ t: "state", i, state: "waiting", message: `${message}, waiting to restart (CrashLoopBackOff)` }), 2500);
         setTimeout(() => {
@@ -1666,6 +1669,42 @@ function auditLines(t: LogTarget, ts: number): string[] {
   const event = { action: pick(["readItem", "readThread", "createItem", "listUsers", "markThreadRead", "listItemsSince"]), after: rnd() < 0.5 ? JSON.stringify(item) : '""', item_id: JSON.stringify(alnum(26)), before: rnd() < 0.3 ? JSON.stringify(item) : '""', user_agent: pick(["ExampleChat-iOS/2.4.0 (iPhone)", "ExampleChat-Desktop/2.4.0 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)", "Go-http-client/1.1"]) };
   const who = { host: t.pod, stream: "audit", user, email: `${user}@example.com`, src_ip: ip, event: JSON.stringify(event), session_id: alnum(26), request_id: alnum(26), ts: ts / 1000 };
   return [JSON.stringify(who), `${JSON.stringify(event)} src_ip=${ip} dest_ip=${ip} handler=/api/${pick(["users", "items", "rooms/members"])} trace_id=${hex(16)} span_id=${hex(16)} status=200`];
+}
+
+/**
+ * How a Go program dies of a fatal error (as Go 1.23 reports it): the error, then every goroutine, the one that crashed
+ * first, with each frame's registers. A thousand lines or so.
+ */
+function goCrash(app: string): string[] {
+  const go = "/usr/local/go/src";
+  const reg = () => `0xc000${hex(6)}`;
+  // A frame's function and its file; an inlined one has no offset nor registers.
+  const f = (fn: string, file: string, inlined = false) => [fn, `\t${file}${inlined ? "" : ` +0x${hex(2)} fp=${reg()} sp=${reg()} pc=0x${hex(6)}`}`];
+  const end = (by: string, file: string) => [...f("runtime.goexit({})", `${go}/runtime/asm_amd64.s:1700`), `created by ${by} in goroutine 1`, `\t${file} +0x${hex(2)}`];
+  const park = f("runtime.gopark(0xc000a1fd60?, 0x2?, 0x10?, 0x0?, 0xc000a1fd2c?)", `${go}/runtime/proc.go:435`);
+  const io = [...park, ...f("runtime.netpollblock(0x4a5b1e?, 0x41c5a6?, 0x0?)", `${go}/runtime/netpoll.go:575`), ...f("internal/poll.runtime_pollWait(0x7f2a1c3e5e28, 0x72)", `${go}/runtime/netpoll.go:351`), ...f("internal/poll.(*pollDesc).wait(0xc000a2a000?, 0x9?, 0x0)", `${go}/internal/poll/fd_poll_runtime.go:84`), ...f("internal/poll.(*pollDesc).waitRead(...)", `${go}/internal/poll/fd_poll_runtime.go:89`, true)];
+  const serve = [...f("net/http.(*conn).serve(0xc00124a1b0, {0x2073b48, 0xc000a1e2d0})", `${go}/net/http/server.go:2092`), ...f("net/http.(*Server).Serve.gowrap3()", `${go}/net/http/server.go:3360`), ...end("net/http.(*Server).Serve", `${go}/net/http/server.go:3360`)];
+  const kinds: [string, string[]][] = [
+    ["IO wait", [...io, ...f("internal/poll.(*FD).Read(0xc000f2a080, {0xc0012b4000, 0x1000, 0x1000})", `${go}/internal/poll/fd_unix.go:165`), ...f("net.(*conn).Read(0xc000a2c0a8, {0xc0012b4000?, 0x0?, 0x0?})", `${go}/net/net.go:194`), ...f("net/http.(*connReader).Read(0xc0012a6f30, {0xc0012b4000, 0x1000, 0x1000})", `${go}/net/http/server.go:798`), ...f("bufio.(*Reader).fill(0xc000f4c060)", `${go}/bufio/bufio.go:113`), ...f("bufio.(*Reader).Peek(0xc000f4c060, 0x4)", `${go}/bufio/bufio.go:152`), ...serve]],
+    ["select", [...park, ...f("runtime.selectgo(0xc000a1ff28, 0xc000a1fefc, 0x0?, 0x0, 0x0?, 0x1)", `${go}/runtime/select.go:351`), ...f("database/sql.(*DB).connectionOpener(0xc0002b6a90, {0x2073b10, 0xc000a1c0f0})", `${go}/database/sql/sql.go:1253`), ...end("database/sql.OpenDB", `${go}/database/sql/sql.go:841`)]],
+    ["chan receive", [...park, ...f("runtime.chanrecv(0xc000a3e0c0, 0xc000a1ff48, 0x1)", `${go}/runtime/chan.go:664`), ...f(`example.com/shop/internal/queue.(*Worker).run(0xc0002c4a00)`, "/src/internal/queue/worker.go:61"), ...end("example.com/shop/internal/queue.Start", "/src/internal/queue/start.go:27")]],
+    ["sleep", [...park, ...f("time.Sleep(0x12a05f200)", `${go}/runtime/time.go:338`), ...f(`example.com/shop/internal/${app}.(*Cache).refresh(0xc0002b4e40)`, `/src/internal/${app}/cache.go:73`), ...end(`example.com/shop/internal/${app}.NewCache`, `/src/internal/${app}/cache.go:31`)]],
+  ];
+  const out = ["fatal error: concurrent map writes", ""];
+  const goroutine = (id: number, state: string, frames: string[]) => out.push(`goroutine ${id} gp=${reg()} ${id === 4182 ? "m=7 mp=0xc000580808" : "m=nil"} [${state}]:`, ...frames, "");
+  goroutine(4182, "running", [
+    ...f("internal/runtime/maps.fatal({0x1d2f4a1?, 0x0?})", `${go}/runtime/panic.go:1058`),
+    ...f(`example.com/shop/internal/${app}.(*Store).Put(0xc0002b4e40, {0xc0011a2f30, 0x24}, 0xc000f4c000)`, `/src/internal/${app}/store.go:88`),
+    ...f(`example.com/shop/internal/${app}.(*Handler).add(0xc0002b4f00, {0x2071c08, 0xc0012e41c0}, 0xc000f3a780)`, `/src/internal/${app}/handler.go:57`),
+    ...f("net/http.HandlerFunc.ServeHTTP(0xc0002b6a10?, {0x2071c08?, 0xc0012e41c0?}, 0xc00142fb88?)", `${go}/net/http/server.go:2220`),
+    ...serve,
+  ]);
+  goroutine(1, "IO wait, 42 minutes", [...io, ...f("internal/poll.(*FD).Accept(0xc000a2a000)", `${go}/internal/poll/fd_unix.go:620`), ...f("net/http.(*Server).Serve(0xc000a1e000, {0x2072f30, 0xc000a2c000})", `${go}/net/http/server.go:3330`), ...f("main.main()", `/src/cmd/${app}/main.go:41`), ...f("runtime.main()", `${go}/runtime/proc.go:283`), ...f("runtime.goexit({})", `${go}/runtime/asm_amd64.s:1700`)]);
+  for (let id = 4100; id < 4160; id++) {
+    const [state, frames] = kinds[id % 7 < 4 ? 0 : (id % 7) - 3];
+    goroutine(id, state, frames);
+  }
+  return out;
 }
 
 /** What a container writes (its kind of app decides the format): one line, or a few (a stack trace). */

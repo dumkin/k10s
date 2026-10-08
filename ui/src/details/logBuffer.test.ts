@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, LogTarget } from "../lib/backend";
 import { Level } from "../lib/logs/parse";
-import { ALL, type Filter, type Line, LogBuffer, pickPods, plainOf, podDone, podEnd, podLabel, type PodRef, Sources } from "./logBuffer";
+import { ALL, type Filter, type Line, LogBuffer, MAX_MORE, MAX_TAIL, pickPods, plainOf, podDone, podEnd, podLabel, type PodRef, Sources } from "./logBuffer";
 
 const containing = (b: LogBuffer, q: string): Filter => (q ? { key: q, test: (l) => b.lower(l).includes(q) } : ALL);
 const texts = (b: LogBuffer, q = "") => b.view(containing(b, q)).map((l) => l.text);
@@ -531,6 +531,72 @@ describe("LogBuffer", () => {
     again.add([...b.lines].map((l): LogLine => [l.i, l.ts, [l.text, ...(l.more ?? [])].join("\n")]));
     expect(b.bytes).toBe(again.bytes);
     expect(texts(b, "no stock")).toEqual(["2026-10-04 10:42:01.000 ERROR [main] c.a.Orders - order failed"]);
+  });
+
+  /** A Go program's crash report (Go 1.23's, on a fatal error): the error, then all `n` goroutines, 16 lines each. */
+  const goCrash = (n: number) => [
+    "fatal error: concurrent map writes",
+    "",
+    ...Array.from({ length: n }, (_, g) => [
+      `goroutine ${g + 1} gp=0xc000${(0x102a80 + g * 0x1c0).toString(16)} ${g ? "m=nil [select]:" : "m=4 mp=0xc000580808 [running]:"}`,
+      ...Array.from({ length: 6 }, (_, f) => [`example.com/shop/internal/queue.step${f}(0xc0001a2000, 0x${f}?)`, `\t/src/internal/queue/step.go:${10 + f} +0x1d fp=0xc00008be30 sp=0xc00008be10 pc=0x47e2ce`]).flat(),
+      "created by example.com/shop/internal/queue.Start in goroutine 1",
+      "\t/src/internal/queue/start.go:7 +0x5a",
+      "",
+    ]).flat(),
+  ];
+
+  it("keeps a Go crash report too long for one entry a stack trace, in entries that each begin with a goroutine", () => {
+    const b = new LogBuffer();
+    const report = goCrash(60);
+    // As the engine sends them: in batches, every line on its own (and searched for as they come).
+    for (let k = 0; k < report.length; k += 100) {
+      b.add(report.slice(k, k + 100).map((text): LogLine => [0, 1000, text]));
+      texts(b, "goroutine");
+    }
+    b.add([[0, 1001, "2026-10-04 10:42:01.000 INFO starting"]]);
+    expect(texts(b)).toEqual([report[0], report[402], report[818], "2026-10-04 10:42:01.000 INFO starting"]);
+    expect([report[402], report[818]].map((h) => h.split(" gp=")[0])).toEqual(["goroutine 26", "goroutine 52"]);
+    expect(b.lines.map((l) => [l.lvl, !!l.stack, l.more?.length])).toEqual([
+      [Level.Error, true, 401],
+      [Level.Error, true, 415],
+      [Level.Error, true, 143],
+      [Level.Info, false, undefined],
+    ]);
+    // Nothing of it is lost or out of order.
+    expect(b.lines.slice(0, 3).map(plainOf).join("\n")).toBe(report.join("\n"));
+    // The bytes are those of what it holds (the lower-case copies of entries that grew went).
+    const again = new LogBuffer();
+    again.add([...report.map((text): LogLine => [0, 1000, text]), [0, 1001, "2026-10-04 10:42:01.000 INFO starting"]]);
+    expect(texts(again, "goroutine")).toEqual(texts(b, "goroutine"));
+    expect(b.bytes).toBe(again.bytes);
+  });
+
+  it("goes on with a stack trace too long for one entry in the next one, at its level, and leaves other lines alone", () => {
+    const b = new LogBuffer();
+    // No goroutine to begin the next entry with: it begins where this one is full.
+    b.add([[0, 1000, "WARN retrying"], ...Array.from({ length: 700 }, (_, k): LogLine => [0, 1000, k % 2 ? `\tat com.acme.F${k}.run(F.java:${k})` : `Caused by: java.io.IOException: closed ${k}`])]);
+    expect(b.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([
+      ["WARN retrying", Level.Warn, true, MAX_MORE + MAX_TAIL],
+      ["Caused by: java.io.IOException: closed 656", Level.Warn, true, 700 - MAX_MORE - MAX_TAIL - 1],
+    ]);
+    // Indented lines that are no stack trace: as many as an entry takes, and the rest is just as plain.
+    const c = new LogBuffer();
+    c.add([[0, 1000, "config:"], ...Array.from({ length: 450 }, (_, k): LogLine => [0, 1000, `  key${k}: value`])]);
+    expect(c.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([
+      ["config:", Level.None, false, MAX_MORE],
+      ["  key400: value", Level.None, false, 49],
+    ]);
+  });
+
+  it("makes a stack trace of a Go crash report read from its middle on", () => {
+    const b = new LogBuffer();
+    b.add(goCrash(3).slice(5).map((text): LogLine => [0, 1000, text]));
+    expect(b.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([["example.com/shop/internal/queue.step1(0xc0001a2000, 0x1?)", Level.Error, true, 44]]);
+    // Its frame's file first: the function after it is more of it.
+    const c = new LogBuffer();
+    c.add(goCrash(1).slice(4, 8).map((text): LogLine => [0, 1000, text]));
+    expect(c.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([["\t/src/internal/queue/step.go:10 +0x1d fp=0xc00008be30 sp=0xc00008be10 pc=0x47e2ce", Level.Error, true, 3]]);
   });
 });
 
