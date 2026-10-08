@@ -122,12 +122,59 @@ describe("follows", () => {
     expect(follows("created by admin: order 42", false, 0)).toBe(0);
     for (const head of ["fatal error: concurrent map writes", "SIGQUIT: quit", "goroutine 7 gp=0xc000102a80 m=nil [IO wait]:", "\t/src/main.go:12 +0x1d", "created by main.main in goroutine 1"]) expect(startsStack(head), head).toBe(true);
     expect(levelOf("SIGSEGV: segmentation violation")).toBe(Error);
+    // A signal's report word for word: a line that only begins so is no crash.
+    expect(levelOf("SIGQUIT: draining connections")).toBe(None);
+    expect(startsStack("SIGQUIT: draining connections")).toBe(false);
     // A frame's function is unindented: more of the stack trace only once one has begun.
     expect(follows("example.com/shop/internal/queue.(*Worker).run(0xc0001a2000)", false, 0)).toBe(0);
     expect(follows("example.com/shop/internal/queue.(*Worker).run(0xc0001a2000)", true, 0)).toBe(1);
     expect(startsStack("main.main()")).toBe(false);
     expect(isGoroutine("goroutine 7 gp=0xc000102a80 m=nil [IO wait]:")).toBe(true);
     expect(isGoroutine("goroutines: 7")).toBe(false);
+  });
+
+  it("tells a stack trace's own lines, every kind of them, from the rest", () => {
+    // (Most lines are ruled out by their first character: each kind of line must begin with one the patterns let in.)
+    const own = [
+      "Caused by: java.io.IOException: closed",
+      "Suppressed: java.io.IOException: closed",
+      "... 12 more",
+      "... 3 common frames omitted",
+      "goroutine 7 [select]:",
+      "[recovered]",
+      "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x4a2b3c]",
+      "created by main.main in goroutine 1",
+      "runtime stack:",
+      "During handling of the above exception, another exception occurred:",
+      "The above exception was the direct cause of the following exception:",
+      "Traceback (most recent call last):",
+    ];
+    for (const line of own) {
+      expect(follows(line, false, 0), line).toBe(2);
+      expect(startsStack(line), line).toBe(true);
+    }
+    for (const line of ["panic: boom", "fatal error: all goroutines are asleep - deadlock!", "SIGABRT: abort", 'Exception in thread "main" java.lang.IllegalStateException', "\t/src/main.go:12"]) expect(startsStack(line), line).toBe(true);
+    for (const line of ["Cause: none", "goroutines: 7", "created by admin: order 42", "runtime stacks:", "The above is fine", "plain words", "\tplain words"]) expect(startsStack(line), line).toBe(false);
+  });
+
+  it("keeps a warning's or an error's Go stack with it, written with it (zap's console, pkg/errors' %+v)", () => {
+    expect(follows("example.com/shop/internal/cart.(*Handler).add", false, 0, Warn)).toBe(2);
+    expect(follows("main.main", false, 1, Error)).toBe(2);
+    // Not after a line of a lower level (a list of names under a heading), nor written later, nor of unknown time.
+    expect(follows("docs/index.html", false, 0, None)).toBe(0);
+    expect(follows("example.com/shop/internal/cart.(*Handler).add", false, 0, Info)).toBe(0);
+    expect(follows("example.com/shop/internal/cart.(*Handler).add", false, 20, Warn)).toBe(0);
+    expect(follows("example.com/shop/internal/cart.(*Handler).add", false, null, Warn)).toBe(0);
+    expect(follows("a sentence. with words", false, 0, Error)).toBe(0);
+  });
+
+  it("reads huge lines by their beginnings, not through to their ends", () => {
+    const huge = "x".repeat(1_000_000);
+    expect(follows(`\t/${huge}`, false, 0)).toBe(1);
+    expect(follows(`created by ${huge}`, false, 0)).toBe(0);
+    expect(follows(`goroutine 7 gp=${huge}`, false, 0)).toBe(0);
+    expect(follows(`example.com/${huge}`, false, 0, Error)).toBe(0);
+    expect(startsStack(`\t${huge}.go:12`)).toBe(false);
   });
 
   it("keeps unindented lines in a stack trace until one starts an entry", () => {

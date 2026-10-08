@@ -798,6 +798,72 @@ describe("log view", () => {
     await tick();
     expect(rows()).toHaveLength(1 + 6 + 1);
     expect(root.querySelector(".lines .ln.fold")!.textContent).toContain("15 more lines");
+    // Folded, it counts what comes; open, it shows it.
+    s.send({ t: "lines", l: [[0, 1001, "\tat com.acme.Last.run(Last.java:1)"]] });
+    await tick();
+    expect(root.querySelector(".lines .ln.fold")!.textContent).toContain("16 more lines");
+    root.querySelector<HTMLButtonElement>(".lines .ln:not(.cont):not(.fold) button.ln-x")!.click();
+    await tick();
+    s.send({ t: "lines", l: [[0, 1001, "\tat com.acme.Later.run(Later.java:2)"]] });
+    await tick();
+    expect(root.querySelector(".ln-detail .ld-text")!.textContent).toContain("Later.java:2");
+    expect(root.querySelector(".ln-detail .ld-meta .tag")!.textContent).toBe("error");
+    expect(root.querySelector(".lines .ln.fold")!.textContent).toContain("17 more lines");
+  });
+
+  it("draws again an entry a Go crash report's next goroutine moved out of", async () => {
+    const { root, s } = await mount();
+    // A crash report, 16 lines a goroutine; the first batch fills an entry to the last of its lines.
+    const report = ["fatal error: concurrent map writes", "", ...Array.from({ length: 30 }, (_, g) => [`goroutine ${g + 1} gp=0xc000102a80 m=nil [select]:`, ...Array.from({ length: 6 }, (_, f) => [`example.com/shop/internal/queue.step${f}()`, `\t/src/internal/queue/step.go:${10 + f} +0x1d`]).flat(), "created by example.com/shop/internal/queue.Start in goroutine 1", "\t/src/internal/queue/start.go:7 +0x5a", ""]).flat()];
+    const send = (part: string[]) => s.send({ t: "lines", l: part.map((text): [number, number, string] => [0, 1000, text]) });
+    const folds = () => [...root.querySelectorAll(".lines .ln.fold")].map((f) => f.textContent!.replace(/\D+/g, ""));
+    send(report.slice(0, 401));
+    await tick();
+    expect(folds()).toEqual(["394"]);
+    // The goroutine its last lines are in goes on in the next entry: it holds fewer.
+    send(report.slice(401));
+    await tick();
+    expect(lines(root).map((t) => t!.split(" gp=")[0])).toEqual(["fatal error: concurrent map writes", "goroutine 25"]);
+    expect(folds()).toEqual(["379", "89"]);
+  });
+
+  it("draws an entry on screen again when its beginning comes with earlier lines", async () => {
+    let clock = Date.now();
+    const now = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      const { root, s } = await mount();
+      // The history read at the start begins inside a Go crash report (as many lines as asked for: there may be more).
+      const start = clock - 3_600_000;
+      const inside = ["goroutine 7 gp=0xc000102a80 m=nil [select]:", "main.worker()", "\t/src/w.go:12 +0x1d"];
+      s.send({ t: "lines", l: [...inside.map((text): [number, number, string] => [0, start, text]), ...Array.from({ length: 997 }, (_, k): [number, number, string] => [0, start + 2000 + k * 2000, `old ${k}`])] });
+      clock += 4000;
+      s.send({ t: "lines", l: [[0, clock, "live"]] });
+      await tick();
+      expect(root.querySelector(".ln-earlier")!.textContent).toContain("Load earlier lines");
+      const el = root.querySelector<HTMLElement>(".code.logs")!;
+      const scroll = (top: number) => {
+        el.dispatchEvent(new Event("wheel"));
+        el.scrollTop = top;
+        el.dispatchEvent(new Event("scroll"));
+      };
+      scroll(200);
+      scroll(0);
+      await tick();
+      const first = () => root.querySelector(".lines .ln:not(.cont):not(.fold)")!;
+      expect(first().querySelector(".txt")!.textContent).toBe(inside[0]);
+      const time = first().querySelector(".ts")!.textContent;
+      // Its beginning, a millisecond before it: the entry on screen is the whole of it now.
+      const read = h.streams[1];
+      read.send({ t: "lines", l: ["fatal error: boom", "", "goroutine 1 [running]:", "main.main()", "\t/src/main.go:5 +0x25", ""].map((text): [number, number, string] => [0, start - 1, text]) });
+      read.send({ t: "state", i: 0, state: "ended" });
+      await tick();
+      expect(first().querySelector(".txt")!.textContent).toBe("fatal error: boom");
+      expect(first().querySelector(".ts")!.textContent).not.toBe(time);
+      expect(first().classList.contains("lvl-5")).toBe(true);
+      expect([...root.querySelectorAll(".lines .ln .txt")].filter((t) => t.textContent === inside[0])).toHaveLength(1);
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 

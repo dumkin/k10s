@@ -340,6 +340,12 @@ export function LogViewer(props: LogViewerProps) {
       // The state each target was last in: changes after the first become markers in the timeline.
       const last = new Map<number, LogState>();
       const restartsOf = (src: Source) => untrack(props.pods).find((p) => podKeyOf(p) === podKeyOf(src))?.restarts;
+      /** The buffer changed: the views follow it, and the entries drawn whose lines changed in place are drawn again. */
+      const changed = () =>
+        batch(() => {
+          lines?.redraw(buf.takeChanged());
+          setVersion((v) => v + 1);
+        });
       const early = (earlier = new Earlier({
         buffer: buf,
         sources: () => srcs.byId,
@@ -351,7 +357,7 @@ export function LogViewer(props: LogViewerProps) {
         onLoaded: () => {
           // (An entry a stack trace's beginning joined has another head: its parsed fields are not its own.)
           structures.clear();
-          setVersion((v) => v + 1);
+          changed();
         },
       }));
       onCleanup(() => early.close());
@@ -376,7 +382,7 @@ export function LogViewer(props: LogViewerProps) {
         lines?.sync();
         const t0 = performance.now();
         change();
-        setVersion((v) => v + 1);
+        changed();
         doneAt = performance.now();
         cost = Math.max(doneAt - t0, cost * 0.75);
       };

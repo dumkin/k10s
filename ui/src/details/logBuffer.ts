@@ -8,11 +8,14 @@ export const MAX_LINES = 100_000;
 export const MAX_BYTES = 64 * 1024 * 1024;
 const LINE_OVERHEAD = 64;
 const MORE_OVERHEAD = 16;
-/** An entry takes at most this many continuation lines; more start an entry of their own… */
+/**
+ * An entry takes at most this many continuation lines; more start an entry of their own (a stack trace's own lines go
+ * on with it there)…
+ */
 export const MAX_MORE = 400;
 /**
- * …but a stack trace takes up to this many more to get to a goroutine's header: a Go crash report too long for one
- * entry goes on in the next from a goroutine on (Go prints a goroutine in about 200 lines at most).
+ * …and a Go crash report goes on from the goroutine it is in: that goroutine's lines so far move on too, when its
+ * header is among the last this many (Go prints a goroutine in about 200 lines at most).
  */
 export const MAX_TAIL = 256;
 /** A buffer whose lines are being read may grow to this many times its budget before those lines are dropped too. */
@@ -69,11 +72,25 @@ export interface Filter {
 /** Everything. */
 export const ALL: Filter = { key: "", test: () => true };
 
+const NONE: readonly Line[] = [];
+
 function size(l: Line): number {
   let n = l.text.length + LINE_OVERHEAD;
   if (l.more) for (const m of l.more) n += m.length + MORE_OVERHEAD;
   if (l.lower !== undefined && l.lower !== l.text) n += l.lower.length;
   return n;
+}
+
+/**
+ * Where the goroutine the last of `more` are in begins (its header, Go's, among the last `MAX_TAIL`), or -1 when they
+ * are in none: Go writes a blank line between goroutines.
+ */
+function goroutineIn(more: readonly string[]): number {
+  for (let k = more.length - 1, end = Math.max(1, more.length - MAX_TAIL); k >= end; k--) {
+    if (more[k] === "") return -1;
+    if (isGoroutine(more[k])) return k;
+  }
+  return -1;
 }
 
 /** The entry's plain text: its lines without ANSI escapes, joined by line breaks. */
@@ -180,6 +197,8 @@ export class LogBuffer {
   private keptTime: { first: Line | undefined; n: number; span: readonly [number, number] | null } | null = null;
   /** A paused view's newest entry (see `extent`), as of the arrivals it shows. */
   private endBy: { upTo: number; line: Line | null } | null = null;
+  /** Entries held whose lines changed in place since `takeChanged` (lines joined them, or moved on to the next). */
+  private changed = new Set<Line>();
 
 
   constructor(
@@ -197,7 +216,10 @@ export class LogBuffer {
     let grown = Infinity;
     const one = (i: number, ts: number | null, text: string, key: number) => {
       const prev = this.line(i, ts, text, key, this.lastEntry, this.lastTs, incoming, true);
-      if (prev && prev.pos >= 0) grown = Math.min(grown, prev.pos);
+      if (prev && prev.pos >= 0) {
+        grown = Math.min(grown, prev.pos);
+        this.changed.add(prev);
+      }
     };
     for (const [i, ts, text] of batch) {
       const key = ts ?? this.lastKey.get(i) ?? fallback;
@@ -239,7 +261,7 @@ export class LogBuffer {
       const prev = last.get(i)!;
       if (head.marker || prev.marker || (prev.more?.length ?? 0) + 1 + (head.more?.length ?? 0) > MAX_MORE) continue;
       const before = lastTs.get(i);
-      const how = follows(head.ansi ? stripAnsi(head.text) : head.text, !!prev.stack, head.ts !== null && before != null ? head.ts - before : null);
+      const how = follows(head.ansi ? stripAnsi(head.text) : head.text, !!prev.stack, head.ts !== null && before != null ? head.ts - before : null, prev.lvl);
       if (!how) continue;
       this.bytes -= size(prev) + size(head);
       head.more = [...(prev.more ?? []), head.text, ...(head.more ?? [])];
@@ -257,6 +279,7 @@ export class LogBuffer {
       this.counts[i]--;
       incoming[incoming.lastIndexOf(prev)] = head;
       moved.push(head);
+      this.changed.add(head);
     }
     // (Each moves to a key not after its own: it goes back in with the lines merged in front of it.)
     for (const k of moved.map((l) => l.pos - this.dropped).sort((a, b) => b - a)) this.lines.splice(k, 1);
@@ -271,22 +294,23 @@ export class LogBuffer {
   }
 
   /**
-   * One line of a source: it continues the source's last entry in `last` (which is returned), or starts an entry,
-   * added to `incoming` — an arrival, or (not `arrived`) an earlier line.
+   * One line of a source: it continues the source's last entry in `last`, or starts an entry, added to `incoming` — an
+   * arrival, or (not `arrived`) an earlier line. Returns the source's last entry when the line changed it.
    */
   private line(i: number, ts: number | null, text: string, key: number, last: Map<number, Line>, lastTs: Map<number, number | null>, incoming: Line[], arrived: boolean): Line | undefined {
     const ansi = hasAnsi(text);
     const plain = ansi ? stripAnsi(text) : text;
     const prev = last.get(i);
     const n = prev?.more?.length ?? 0;
-    /** The stack trace the line is more of, in an entry of its own: the one it was in is full. */
+    /** A stack trace too long for the entry it is in, which the line goes on with in an entry of its own… */
     let goesOn: Line | undefined;
+    /** …from the goroutine its last lines are in, when it is a Go crash report: where among them it begins (or -1). */
+    let from = -1;
     // The source's last entry: in this batch (no position yet), or still in the buffer — full, if it is a stack trace.
     if (prev && !prev.marker && (prev.pos < 0 || prev.pos >= this.dropped) && (n < MAX_MORE || prev.stack)) {
       const before = lastTs.get(i);
-      const how = follows(plain, !!prev.stack, ts !== null && before != null ? ts - before : null);
-      if (how && n >= MAX_MORE && (n >= MAX_MORE + MAX_TAIL || isGoroutine(plain))) goesOn = prev;
-      else if (how) {
+      const how = follows(plain, !!prev.stack, ts !== null && before != null ? ts - before : null, prev.lvl);
+      if (how && n < MAX_MORE) {
         // (What it took grows by the line, and its lower-case copy goes: see `size`.)
         if (prev.lower !== undefined && prev.lower !== prev.text) this.bytes -= prev.lower.length;
         this.bytes += text.length + MORE_OVERHEAD;
@@ -302,19 +326,54 @@ export class LogBuffer {
         if (ts !== null) lastTs.set(i, ts);
         return prev;
       }
+      // Full: the trace goes on with its own lines, and in the goroutine Go prints together. Lines it took in that are
+      // none of its own (prose without a time, after it) go on as entries of their own.
+      if (how) {
+        from = goroutineIn(prev.more!);
+        if (from >= 0 || how === 2 || startsStack(plain)) goesOn = prev;
+      }
     }
     const l: Line = { i, ts, key, text, width: plain.length, lvl: levelOf(plain), ansi, pos: -1, seq: arrived ? this.seq++ : -1 };
-    // A stack trace (or more of one) is an error unless it says otherwise; more of one is at its level.
-    if (goesOn || startsStack(plain)) {
+    if (goesOn) {
       l.stack = true;
-      l.lvl = goesOn?.lvl || l.lvl || Level.Error;
+      l.lvl = goesOn.lvl || l.lvl || Level.Error;
+      if (from >= 0) this.moveOn(goesOn, from, l);
+    } else if (startsStack(plain)) {
+      // A stack trace is an error unless it says otherwise.
+      l.stack = true;
+      l.lvl ||= Level.Error;
     }
     incoming.push(l);
     this.bytes += size(l);
     this.counts[i] = (this.counts[i] ?? 0) + 1;
     last.set(i, l);
     lastTs.set(i, ts);
-    return undefined;
+    return from >= 0 ? goesOn : undefined;
+  }
+
+  /**
+   * Moves the goroutine a Go crash report too long for `from` is in — its lines from `k` on — to the beginning of
+   * `to`, which the line after them began: the report goes on from a goroutine on.
+   */
+  private moveOn(from: Line, k: number, to: Line) {
+    this.bytes -= size(from);
+    const lines = from.more!.splice(k);
+    const widths = from.moreWidth!.splice(k);
+    from.lower = undefined;
+    this.bytes += size(from);
+    to.more = [...lines.slice(1), to.text];
+    to.moreWidth = [...widths.slice(1), to.width];
+    to.text = lines[0];
+    to.width = widths[0];
+    to.ansi = hasAnsi(lines[0]);
+  }
+
+  /** The entries held whose lines changed in place since this was last asked: those drawn are drawn again. */
+  takeChanged(): readonly Line[] {
+    if (!this.changed.size) return NONE;
+    const out = [...this.changed];
+    this.changed.clear();
+    return out;
   }
 
   /** The first entry held of each of `sources` (that has one). */
@@ -592,6 +651,7 @@ export class LogBuffer {
     this.lastKey.clear();
     this.lastEntry.clear();
     this.lastTs.clear();
+    this.changed.clear();
     this.views.clear();
     this.keptTime = null;
     this.endBy = null;

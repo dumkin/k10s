@@ -73,6 +73,8 @@ export interface LinesHandle {
   shown(): boolean;
   /** While the view is read (not following), the first position drawn: the buffer keeps it and what follows. */
   holdPos(): number | null;
+  /** Entries whose lines changed in place (see `LogBuffer.takeChanged`): those drawn are drawn anew. */
+  redraw(changed: readonly Line[]): void;
 }
 
 interface Layout {
@@ -506,6 +508,16 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
   );
   const startIndex = () => range()[0];
   const windowLines = createMemo(() => layout().lines.slice(range()[0], range()[1]));
+  // The rows are drawn by a key of their entry's: the same one while its lines stay as they are (a node stays with its
+  // entry as it scrolls), a new one once they changed in place (see `redraw`) — that entry alone is drawn anew. Nothing
+  // of an entry drawn is looked at again on every batch for it.
+  const rowKeys = new WeakMap<Line, { l: Line }>();
+  const rowKey = (l: Line) => {
+    let key = rowKeys.get(l);
+    if (!key) rowKeys.set(l, (key = { l }));
+    return key;
+  };
+  const windowKeys = createMemo(() => windowLines().map(rowKey));
   const offsetTop = () => headH() + offsetOf(layout(), startIndex());
 
   // ------------------------------------------------------------------ the user scrolls
@@ -745,6 +757,9 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
       const first = windowLines()[0] ?? untrack(anchor)?.line;
       return first ? Math.max(first.pos, c.buffer().dropped) : null;
     },
+    redraw(changed) {
+      for (const l of changed) rowKeys.delete(l);
+    },
   });
   onCleanup(() => props.ref(undefined));
 
@@ -880,13 +895,8 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
     }
     const s = () => (pretty() ? c.structures.get(l) : null);
     const head = createMemo(() => headOf(l, s(), pretty(), pinnedKeys(), c.hl(), tokenUpTo()));
-    // More of it may come once it is drawn (a stack trace's frames, with the next lines): its rows, and the level they
-    // give it, follow.
-    const grown = createMemo(() => (c.version(), l.more?.length ?? 0));
-    const lvl = createMemo(() => (c.version(), l.lvl));
-    const folded = () => (grown(), foldsOf(l));
+    const folded = () => foldsOf(l);
     const more = () => {
-      grown();
       const m = l.more;
       if (!m) return [];
       return folded() ? m.slice(0, FOLD_SHOW) : m;
@@ -895,7 +905,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
     return (
       <>
         <div
-          class={`ln lvl-${lvl()}${c.selected() === l ? " sel" : ""}${inSpan(l) ? " inspan" : ""}${isOpen() ? " open" : ""}${gap() ? " gap" : ""}`}
+          class={`ln lvl-${l.lvl}${c.selected() === l ? " sel" : ""}${inSpan(l) ? " inspan" : ""}${isOpen() ? " open" : ""}${gap() ? " gap" : ""}`}
           data-gap={gap()}
           onMouseDown={noShiftSelect}
           onClick={(e) => clickLine(l, e)}
@@ -928,7 +938,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
         </div>
         <For each={more()}>
           {(text) => (
-            <div class={`ln cont lvl-${lvl()}`} classList={{ sel: c.selected() === l, inspan: inSpan(l) }} onMouseDown={noShiftSelect} onClick={(e) => clickLine(l, e)}>
+            <div class={`ln cont lvl-${l.lvl}`} classList={{ sel: c.selected() === l, inspan: inSpan(l) }} onMouseDown={noShiftSelect} onClick={(e) => clickLine(l, e)}>
               <span class="ln-x" />
               <Prefix l={l} cont />
               <RowText pieces={textPieces(text, text.includes("\x1b"), pretty(), c.hl(), tokenUpTo())} />
@@ -936,11 +946,11 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
           )}
         </For>
         <Show when={folded()}>
-          <div class={`ln fold lvl-${lvl()}`} onClick={() => c.toggleFold(l)} title="Show the whole stack trace">
+          <div class={`ln fold lvl-${l.lvl}`} onClick={() => c.toggleFold(l)} title="Show the whole stack trace">
             <span class="ln-x" />
             <Prefix l={l} cont />
             <span class="txt">
-              <Icon name="chevron-down" size={10} /> {count(grown() - FOLD_SHOW)} more lines
+              <Icon name="chevron-down" size={10} /> {count(l.more!.length - FOLD_SHOW)} more lines
             </span>
           </div>
         </Show>
@@ -979,11 +989,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
     const s = () => c.structures.get(l);
     const json = createMemo(() => (s()?.kind === "json" ? jsonOf(l.ansi ? l.text.replace(/\x1b\[[\d;]*m/g, "") : l.text) : null));
     const pattern = () => c.patternOf(l);
-    // (More of a stack trace may come while it is open.)
-    const grown = createMemo(() => (c.version(), l.more?.length ?? 0));
-    const lvl = createMemo(() => (c.version(), l.lvl));
-    const unfoldedHere = () => (grown(), !foldsOf(l));
-    const text = createMemo(() => (grown(), [l.text, ...(l.more ?? [])].join("\n").replace(/\x1b\[[\d;]*m/g, "")));
+    const unfoldedHere = () => !foldsOf(l);
     return (
       <div
         class="ln-detail"
@@ -1004,7 +1010,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
               {src()!.namespace}/{src()!.pod} <span class="faint">· {src()!.container}</span>
             </span>
           </Show>
-          <span class={`tag lvl-${lvl()}`}>{lvl() ? LEVEL_NAME[lvl()] : "no level"}</span>
+          <span class={`tag lvl-${l.lvl}`}>{l.lvl ? LEVEL_NAME[l.lvl] : "no level"}</span>
         </div>
         <Show when={s()}>
           <div class="ld-fields">
@@ -1041,7 +1047,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
         </Show>
         <Show when={!s()}>
           <pre class="ld-text" ref={(e) => fullText.set(e, () => plainOf(l))}>
-            <LongText text={text()} max={TEXT_SHOWN} />
+            <LongText text={[l.text, ...(l.more ?? [])].join("\n").replace(/\x1b\[[\d;]*m/g, "")} max={TEXT_SHOWN} />
           </pre>
         </Show>
         <div class="ld-actions">
@@ -1064,7 +1070,7 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
               <Icon name="layers" size={11} /> {c.solo() === l.i ? "All sources" : "Only this source"}
             </button>
           </Show>
-          <Show when={grown() > FOLD_AT && fold()}>
+          <Show when={(l.more?.length ?? 0) > FOLD_AT && fold()}>
             <button class="btn sm ghost" onClick={() => c.toggleFold(l)}>
               {unfoldedHere() ? "Fold the stack trace" : "Unfold the stack trace"}
             </button>
@@ -1166,8 +1172,8 @@ export function LogLines(props: { ctx: LogCtx; ref: (h: LinesHandle | undefined)
             </div>
           </Show>
           <div class="lines" style={{ transform: `translateY(${offsetTop()}px)` }}>
-            {/* Keyed by line, not by slot: a node stays with its line as it scrolls, and so does a text selection in it. */}
-            <For each={windowLines()}>{(l, k) => <Entry l={l} prev={() => layout().lines[startIndex() + k() - 1]} />}</For>
+            {/* Keyed by line (see `rowKey`), not by slot: a node stays with its line as it scrolls, and so does a text selection in it. */}
+            <For each={windowKeys()}>{(key, k) => <Entry l={key.l} prev={() => layout().lines[startIndex() + k() - 1]} />}</For>
           </div>
         </div>
         <Show when={empty()}>

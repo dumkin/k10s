@@ -1691,19 +1691,18 @@ function goCrash(app: string): string[] {
     ["sleep", [...park, ...f("time.Sleep(0x12a05f200)", `${go}/runtime/time.go:338`), ...f(`example.com/shop/internal/${app}.(*Cache).refresh(0xc0002b4e40)`, `/src/internal/${app}/cache.go:73`), ...end(`example.com/shop/internal/${app}.NewCache`, `/src/internal/${app}/cache.go:31`)]],
   ];
   const out = ["fatal error: concurrent map writes", ""];
-  const goroutine = (id: number, state: string, frames: string[]) => out.push(`goroutine ${id} gp=${reg()} ${id === 4182 ? "m=7 mp=0xc000580808" : "m=nil"} [${state}]:`, ...frames, "");
+  // (The one running is on a thread, `m`; the others wait.)
+  const goroutine = (id: number, state: string, frames: string[], m = "m=nil") => out.push(`goroutine ${id} gp=${reg()} ${m} [${state}]:`, ...frames, "");
   goroutine(4182, "running", [
     ...f("internal/runtime/maps.fatal({0x1d2f4a1?, 0x0?})", `${go}/runtime/panic.go:1058`),
     ...f(`example.com/shop/internal/${app}.(*Store).Put(0xc0002b4e40, {0xc0011a2f30, 0x24}, 0xc000f4c000)`, `/src/internal/${app}/store.go:88`),
     ...f(`example.com/shop/internal/${app}.(*Handler).add(0xc0002b4f00, {0x2071c08, 0xc0012e41c0}, 0xc000f3a780)`, `/src/internal/${app}/handler.go:57`),
     ...f("net/http.HandlerFunc.ServeHTTP(0xc0002b6a10?, {0x2071c08?, 0xc0012e41c0?}, 0xc00142fb88?)", `${go}/net/http/server.go:2220`),
     ...serve,
-  ]);
+  ], "m=7 mp=0xc000580808");
   goroutine(1, "IO wait, 42 minutes", [...io, ...f("internal/poll.(*FD).Accept(0xc000a2a000)", `${go}/internal/poll/fd_unix.go:620`), ...f("net/http.(*Server).Serve(0xc000a1e000, {0x2072f30, 0xc000a2c000})", `${go}/net/http/server.go:3330`), ...f("main.main()", `/src/cmd/${app}/main.go:41`), ...f("runtime.main()", `${go}/runtime/proc.go:283`), ...f("runtime.goexit({})", `${go}/runtime/asm_amd64.s:1700`)]);
-  for (let id = 4100; id < 4160; id++) {
-    const [state, frames] = kinds[id % 7 < 4 ? 0 : (id % 7) - 3];
-    goroutine(id, state, frames);
-  }
+  // Most wait for a request.
+  for (let id = 4100; id < 4160; id++) goroutine(id, ...kinds[[0, 0, 0, 0, 1, 2, 3][id % 7]]);
   return out;
 }
 

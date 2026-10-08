@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, LogTarget } from "../lib/backend";
 import { Level } from "../lib/logs/parse";
-import { ALL, type Filter, type Line, LogBuffer, MAX_MORE, MAX_TAIL, pickPods, plainOf, podDone, podEnd, podLabel, type PodRef, Sources } from "./logBuffer";
+import { ALL, type Filter, type Line, LogBuffer, MAX_MORE, pickPods, plainOf, podDone, podEnd, podLabel, type PodRef, Sources } from "./logBuffer";
 
 const containing = (b: LogBuffer, q: string): Filter => (q ? { key: q, test: (l) => b.lower(l).includes(q) } : ALL);
 const texts = (b: LogBuffer, q = "") => b.view(containing(b, q)).map((l) => l.text);
@@ -531,6 +531,8 @@ describe("LogBuffer", () => {
     again.add([...b.lines].map((l): LogLine => [l.i, l.ts, [l.text, ...(l.more ?? [])].join("\n")]));
     expect(b.bytes).toBe(again.bytes);
     expect(texts(b, "no stock")).toEqual(["2026-10-04 10:42:01.000 ERROR [main] c.a.Orders - order failed"]);
+    // It changed in place: drawn, it is drawn again.
+    expect(b.takeChanged()).toEqual([held]);
   });
 
   /** A Go program's crash report (Go 1.23's, on a fatal error): the error, then all `n` goroutines, 16 lines each. */
@@ -555,37 +557,92 @@ describe("LogBuffer", () => {
       texts(b, "goroutine");
     }
     b.add([[0, 1001, "2026-10-04 10:42:01.000 INFO starting"]]);
-    expect(texts(b)).toEqual([report[0], report[402], report[818], "2026-10-04 10:42:01.000 INFO starting"]);
-    expect([report[402], report[818]].map((h) => h.split(" gp=")[0])).toEqual(["goroutine 26", "goroutine 52"]);
-    expect(b.lines.map((l) => [l.lvl, !!l.stack, l.more?.length])).toEqual([
-      [Level.Error, true, 401],
-      [Level.Error, true, 415],
-      [Level.Error, true, 143],
-      [Level.Info, false, undefined],
+    // No more lines than an entry takes: a full one's goroutine moves on to the next entry, with what follows of it.
+    const dump = b.lines.slice(0, 3);
+    expect(dump.map((l) => l.text.split(" gp=")[0])).toEqual(["fatal error: concurrent map writes", "goroutine 25", "goroutine 50"]);
+    expect(dump.map((l) => [l.lvl, !!l.stack, l.more!.length <= MAX_MORE])).toEqual([
+      [Level.Error, true, true],
+      [Level.Error, true, true],
+      [Level.Error, true, true],
     ]);
+    expect(b.lines[3]).toMatchObject({ text: "2026-10-04 10:42:01.000 INFO starting", lvl: Level.Info });
     // Nothing of it is lost or out of order.
-    expect(b.lines.slice(0, 3).map(plainOf).join("\n")).toBe(report.join("\n"));
-    // The bytes are those of what it holds (the lower-case copies of entries that grew went).
+    expect(dump.map(plainOf).join("\n")).toBe(report.join("\n"));
+    // The bytes are those of what it holds (the lower-case copies of entries that changed went).
     const again = new LogBuffer();
     again.add([...report.map((text): LogLine => [0, 1000, text]), [0, 1001, "2026-10-04 10:42:01.000 INFO starting"]]);
     expect(texts(again, "goroutine")).toEqual(texts(b, "goroutine"));
     expect(b.bytes).toBe(again.bytes);
   });
 
-  it("goes on with a stack trace too long for one entry in the next one, at its level, and leaves other lines alone", () => {
+  it("moves a full entry's goroutine out of it once it is held, and tells which entries held changed", () => {
     const b = new LogBuffer();
-    // No goroutine to begin the next entry with: it begins where this one is full.
-    b.add([[0, 1000, "WARN retrying"], ...Array.from({ length: 700 }, (_, k): LogLine => [0, 1000, k % 2 ? `\tat com.acme.F${k}.run(F.java:${k})` : `Caused by: java.io.IOException: closed ${k}`])]);
-    expect(b.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([
-      ["WARN retrying", Level.Warn, true, MAX_MORE + MAX_TAIL],
-      ["Caused by: java.io.IOException: closed 656", Level.Warn, true, 700 - MAX_MORE - MAX_TAIL - 1],
-    ]);
-    // Indented lines that are no stack trace: as many as an entry takes, and the rest is just as plain.
+    b.add([[0, 1000, "worker stopped"], [1, 1000, "other"]]);
+    expect(b.takeChanged()).toEqual([]);
+    b.add([[0, 1000, "\tat com.acme.Worker.run(Worker.java:12)"]]);
+    expect(b.takeChanged()).toEqual([b.lines[0]]);
+    expect(b.takeChanged()).toEqual([]);
+    // A Go crash report that just filled its entry: the goroutine its last lines are in leaves it with the next line.
     const c = new LogBuffer();
-    c.add([[0, 1000, "config:"], ...Array.from({ length: 450 }, (_, k): LogLine => [0, 1000, `  key${k}: value`])]);
-    expect(c.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([
+    const report = goCrash(30);
+    c.add(report.slice(0, MAX_MORE + 1).map((text): LogLine => [0, 1000, text]));
+    const first = c.lines[0];
+    expect(first.more).toHaveLength(MAX_MORE);
+    c.takeChanged();
+    const matches = c.view(containing(c, "goroutine 25 "));
+    expect(matches).toEqual([first]);
+    c.add(report.slice(MAX_MORE + 1).map((text): LogLine => [0, 1000, text]));
+    expect(c.takeChanged()).toEqual([first]);
+    expect(first.more!.at(-1)).toBe("");
+    expect(c.lines[1].text.split(" gp=")[0]).toBe("goroutine 25");
+    // The views find it where it is now.
+    expect(c.view(containing(c, "goroutine 25 "))).toEqual([c.lines[1]]);
+    expect(c.lines.map(plainOf).join("\n")).toBe(report.join("\n"));
+  });
+
+  it("goes on with a stack trace too long for one entry while its own lines come, and leaves the rest as it was", () => {
+    const b = new LogBuffer();
+    // Its own lines (frames, causes): the next entry is more of it, at its level.
+    b.add([[0, 1000, "WARN retrying"], ...Array.from({ length: 450 }, (_, k): LogLine => [0, 1000, k % 2 ? `\tat com.acme.F${k}.run(F.java:${k})` : `Caused by: java.io.IOException: closed ${k}`])]);
+    expect(b.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([
+      ["WARN retrying", Level.Warn, true, MAX_MORE],
+      ["Caused by: java.io.IOException: closed 400", Level.Warn, true, 49],
+    ]);
+    // Lines it took in that are none of its own (prose without a time, right after it) end it there: they are entries
+    // of their own, not a stack trace that takes in all that comes.
+    const c = new LogBuffer();
+    const trace: LogLine[] = ["Traceback (most recent call last):", '  File "/app/worker.py", line 3, in <module>', "    run()", "ValueError: bad item"].map((text) => [0, 1000, text]);
+    c.add([...trace, ...Array.from({ length: 1000 }, (_, k): LogLine => [0, 1001 + k * 10, `processing item ${k}`])]);
+    expect(c.lines[0]).toMatchObject({ lvl: Level.Error, stack: true });
+    expect(c.lines[0].more).toHaveLength(MAX_MORE);
+    expect(c.lines).toHaveLength(1 + 1000 - (MAX_MORE - 3));
+    expect(c.lines.slice(1).every((l) => !l.stack && l.lvl === Level.None && !l.more)).toBe(true);
+    // Indented lines that are no stack trace: as many as an entry takes, and the rest is just as plain.
+    const d = new LogBuffer();
+    d.add([[0, 1000, "config:"], ...Array.from({ length: 450 }, (_, k): LogLine => [0, 1000, `  key${k}: value`])]);
+    expect(d.lines.map((l) => [l.text, l.lvl, !!l.stack, l.more?.length])).toEqual([
       ["config:", Level.None, false, MAX_MORE],
       ["  key400: value", Level.None, false, 49],
+    ]);
+  });
+
+  it("keeps a warning's Go stack with it (zap's console output), and a list after a heading apart", () => {
+    const b = new LogBuffer();
+    b.add([
+      [0, 1000, "2026-10-04T10:42:01.000Z\tWARN\tcart/handler.go:42\tslow request\t{\"ms\": 812}"],
+      [0, 1000, "example.com/shop/internal/cart.(*Handler).add"],
+      [0, 1000, "\t/src/internal/cart/handler.go:57"],
+      [0, 1000, "net/http.HandlerFunc.ServeHTTP"],
+      [0, 1000, "\t/usr/local/go/src/net/http/server.go:2220"],
+      [0, 1001, "2026-10-04T10:42:01.001Z\tINFO\tcart/handler.go:60\tdone"],
+      [0, 2000, "uploaded:"],
+      [0, 2000, "docs/index.html"],
+    ]);
+    expect(b.lines.map((l) => [l.lvl, !!l.stack, l.more?.length ?? 0])).toEqual([
+      [Level.Warn, true, 4],
+      [Level.Info, false, 0],
+      [Level.None, false, 0],
+      [Level.None, false, 0],
     ]);
   });
 
