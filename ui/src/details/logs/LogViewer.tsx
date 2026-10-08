@@ -136,6 +136,8 @@ export interface LogCtx {
   base: Accessor<Line[]>;
   patternsBase: Accessor<Line[]>;
   matches: Accessor<Line[] | null>;
+  /** The views show the entries the buffer kept for the filters (see `LogBuffer.kept`). */
+  withKept: Accessor<boolean>;
   hl: Accessor<Highlight | undefined>;
   queryOn: Accessor<boolean>;
   /** The cursor: the line picked (by a click, the keys, a jump). */
@@ -872,6 +874,7 @@ export function LogViewer(props: LogViewerProps) {
     base,
     patternsBase,
     matches,
+    withKept,
     hl,
     queryOn: () => filters().queryOn,
     selected,

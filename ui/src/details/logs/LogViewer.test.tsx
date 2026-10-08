@@ -8,7 +8,7 @@ import { setToasts, toasts } from "../../state/ui";
 import type { UIRow } from "../../state/view";
 import { LogsTab } from "../LogsTab";
 import { budget, timing } from "./LogViewer";
-import { setFilterMode, setFold, setPinned, setPretty } from "./model";
+import { setFilterMode, setFold, setPinned, setPretty, setUtc } from "./model";
 
 // The log view as a whole: a pod's stream (the engine is a recorder), what the filters and the keys do to it.
 const h = vi.hoisted(() => ({
@@ -930,5 +930,114 @@ describe("log view under a flood of lines", () => {
     await tick();
     const el = scroller(root);
     expect(el.scrollWidth).toBe(el.clientWidth);
+  });
+});
+
+describe("log histogram", () => {
+  beforeAll(() => setUtc(true));
+  afterAll(() => setUtc(false));
+  /** Lines counted again (a pass, every 250 ms at most). */
+  const pass = () => new Promise((r) => setTimeout(r, 300));
+  const frame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)));
+  /** The strip, laid out 600 px wide at the window's left edge: 120 bars of 5 px. */
+  const strip = (root: HTMLElement) => {
+    const box = root.querySelector<HTMLElement>(".lhist")!;
+    Object.defineProperty(box, "clientWidth", { configurable: true, value: 600 });
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 46, width: 600, height: 46, x: 0, y: 0, toJSON: () => ({}) });
+    resize(box, 46);
+    return box;
+  };
+  /** The pointer at x (moves say no button is held, as events handed to WebKit by software do). */
+  const point = async (box: HTMLElement, type: string, x: number) => {
+    box.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: 20, button: 0, buttons: 0, bubbles: type !== "pointerenter" && type !== "pointerleave" }));
+    await frame();
+  };
+  const click = async (box: HTMLElement, x: number) => {
+    await point(box, "pointerdown", x);
+    await point(box, "pointerup", x);
+  };
+  const tip = (root: HTMLElement) => root.querySelector(".lhist-tip")?.textContent;
+  const selected = (root: HTMLElement) => root.querySelector(".lines .ln.sel .txt")?.textContent;
+  /** A line a second from 00:10:00 (`from` on): bars of a second, the 100th line's on the right. */
+  const second = (k: number, text = `INFO line ${k}`): [number, number, string] => [0, 600_000 + k * 1000, text];
+
+  it("holds still under the pointer: the bar pointed at stays, whatever comes, until the pointer leaves", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k)) });
+    await pass();
+    const box = strip(root);
+    // 00:10:20 is the 40th of the 120 bars (00:09:40 … 00:11:39).
+    await point(box, "pointerenter", 202);
+    expect(tip(root)).toBe("00:10:20–00:10:21 · 1 info");
+    expect(root.querySelector<HTMLElement>(".lhist-hover")!.style.left).toBe("200px");
+    // More lines, that the bars no longer fit, and a query: the bar stays.
+    s.send({ t: "lines", l: Array.from({ length: 31 }, (_, k) => second(120 + k)) });
+    await query(root, "line");
+    await pass();
+    expect(tip(root)).toBe("00:10:20–00:10:21 · 1 info");
+    expect(root.querySelector<HTMLElement>(".lhist-hover")!.style.left).toBe("200px");
+    await click(box, 202);
+    expect(selected(root)).toBe("INFO line 20");
+    // Away and back: the bars caught up (bars of 2 s now), another one is there.
+    await point(box, "pointerleave", 202);
+    await point(box, "pointerenter", 202);
+    expect(tip(root)).toBe("00:09:52–00:09:54 · nothing");
+  });
+
+  it("picks the bars a drag goes over, though lines come meanwhile", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k)) });
+    await pass();
+    const box = strip(root);
+    await point(box, "pointerenter", 202);
+    await point(box, "pointerdown", 202);
+    await point(box, "pointermove", 252);
+    s.send({ t: "lines", l: Array.from({ length: 31 }, (_, k) => second(120 + k)) });
+    await pass();
+    const brush = root.querySelector<HTMLElement>(".lhist-brush")!;
+    expect([brush.style.left, brush.style.width]).toEqual(["200px", "55px"]);
+    expect(tip(root)).toBe("00:10:20–00:10:31 · 11s");
+    await point(box, "pointerup", 252);
+    expect(root.querySelector(".range-chip")!.textContent).toContain("00:10:20 – 00:10:31");
+    expect(lines(root)).toEqual(Array.from({ length: 11 }, (_, k) => `INFO line ${20 + k}`));
+  });
+
+  it("takes a drag back on Escape: nothing is picked, and past the strip the bars move on", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k)) });
+    await pass();
+    const box = strip(root);
+    await point(box, "pointerenter", 202);
+    await point(box, "pointerdown", 202);
+    await point(box, "pointermove", 252);
+    expect(root.querySelector(".lhist-brush")).not.toBeNull();
+    await point(box, "pointerleave", 700);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await frame();
+    expect([root.querySelector(".lhist-brush"), root.querySelector(".lhist-tip"), root.querySelector(".range-chip")]).toEqual([null, null, null]);
+    // The bars caught up: the newest is 3 s later, so is the bar there.
+    s.send({ t: "lines", l: [second(101), second(102)] });
+    await pass();
+    await point(box, "pointerenter", 202);
+    expect(tip(root)).toBe("00:10:23–00:10:24 · 1 info");
+  });
+
+  it("shows all the time again for a click on a bar left out of the time picked; an empty bar goes to the nearest line", async () => {
+    const { root, s } = await mount();
+    // 00:10:00 … 00:10:09, then 00:10:40 … 00:10:49: bars of a second, from 00:08:50 on.
+    s.send({ t: "lines", l: [...Array.from({ length: 10 }, (_, k) => second(k, `INFO a${k}`)), ...Array.from({ length: 10 }, (_, k) => second(40 + k, `INFO b${k}`))] });
+    await pass();
+    const box = strip(root);
+    await point(box, "pointerenter", 552);
+    await point(box, "pointerdown", 552);
+    await point(box, "pointermove", 597);
+    await point(box, "pointerup", 597);
+    expect(lines(root)).toEqual(Array.from({ length: 10 }, (_, k) => `INFO b${k}`));
+    await click(box, 377);
+    expect(root.querySelector(".range-chip")).toBeNull();
+    expect(selected(root)).toBe("INFO a5");
+    // 00:10:30: nothing there; 00:10:40 is nearer than 00:10:09.
+    await click(box, 502);
+    expect(selected(root)).toBe("INFO b0");
   });
 });

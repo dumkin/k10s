@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { asJsonl, asRaw, asText, clockOf, gapOf, stampOf } from "./format";
 import { overlay, slicePieces, tokenize } from "./highlight";
-import { histogram, histogramStep, LEVEL_SLOTS, stepFor, stepLabel } from "./histogram";
+import { type Axis, barAtX, barOf, barStart, extentOf, histogram, LEVEL_SLOTS, MAX_BARS, maxIn, offsetAt, tapeStep, ticks, timeOf, xOfBar, xOfTime } from "./histogram";
 import { Level } from "./parse";
 import { PatternIds, patternOf, patternParts } from "./patterns";
 
@@ -30,32 +30,116 @@ describe("patterns", () => {
 });
 
 describe("histogram", () => {
-  it("chooses round buckets that fit", () => {
-    expect(stepFor(60_000, 60)).toBe(2000);
-    expect(stepFor(3_500_000, 120)).toBe(30_000);
-    expect(stepFor(3_600_000, 120)).toBe(60_000);
-    expect(stepFor(10 * 86_400_000, 100)).toBe(3 * 3_600_000);
-    expect(stepFor(400 * 86_400_000, 100)).toBe(4 * 86_400_000);
-    expect([stepLabel(5000), stepLabel(900_000), stepLabel(7_200_000), stepLabel(86_400_000)]).toEqual(["5s", "15m", "2h", "1d"]);
+  const S = 1000;
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+
+  it("puts bars at round times from midnight, in the time zone's", () => {
+    // 08:45 UTC is 14:15 at +5:30: its hour starts at 14:00 there, 08:30 UTC.
+    const t = Date.UTC(2026, 9, 8, 8, 45);
+    expect(barStart(barOf(t, HOUR, 5.5 * HOUR), HOUR, 5.5 * HOUR)).toBe(Date.UTC(2026, 9, 8, 8, 30));
+    // At -3:00 its day starts at midnight there, 03:00 UTC.
+    expect(barStart(barOf(t, DAY, -3 * HOUR), DAY, -3 * HOUR)).toBe(Date.UTC(2026, 9, 8, 3));
+    expect(offsetAt(t, true)).toBe(0);
   });
 
-  it("counts lines per bucket and level, markers apart", () => {
+  it("takes the finest step the lines fit in: coarser at once, finer only with room to spare", () => {
+    // 10.5 s … 20.4 s takes 11 bars of a second (from 10 to 20), not 10.
+    expect(tapeStep(10_500, 20_400, 10, 0, null)).toBe(2000);
+    expect(tapeStep(10_500, 20_400, 11, 0, null)).toBe(1000);
+    // Lines that outgrow the bars of 2 s: 5 s at once.
+    expect(tapeStep(0, 30 * S, 10, 0, 2000)).toBe(5000);
+    // 9 s fit in 10 bars of a second, but not in 3/4 of them: 2 s stay; 7 s do.
+    expect(tapeStep(0, 8_999, 10, 0, 2000)).toBe(2000);
+    expect(tapeStep(0, 6_999, 10, 0, 2000)).toBe(1000);
+    // With no step before: the finest.
+    expect(tapeStep(0, 8_999, 10, 0, null)).toBe(1000);
+  });
+
+  it("keeps its step while a full buffer's span swings by a tenth where the step would change", () => {
+    // 100 bars hold 100 s at 1 s: the span goes from 101 s to 90 s and back as the oldest lines go.
+    const steps = new Set<number>();
+    let step: number | null = null;
+    for (let k = 0; k < 50; k++) {
+      step = tapeStep(1_000_000, 1_000_000 + (k % 2 ? 90_000 : 101_000), 100, 0, step);
+      steps.add(step);
+    }
+    expect([...steps]).toEqual([2000]);
+  });
+
+  it("counts whole days past the longest step", () => {
+    expect(tapeStep(0, 10 * DAY, 100, 0, null)).toBe(3 * HOUR);
+    expect(tapeStep(0, 399 * DAY, 100, 0, null)).toBe(4 * DAY);
+    // 400 days take 101 bars of 4 days (from 0 to 100).
+    expect(tapeStep(0, 400 * DAY, 100, 0, null)).toBe(5 * DAY);
+  });
+
+  it("covers the lines from the first that has a time to the last that is no marker", () => {
+    expect(
+      extentOf([
+        { key: 0, lvl: Level.Info },
+        { key: 0, lvl: Level.Info },
+        { key: 5000, lvl: Level.Info },
+        { key: 9000, lvl: Level.Warn },
+        { key: 60_000, lvl: Level.Info, marker: true },
+      ]),
+    ).toEqual([5000, 9000]);
+    expect([extentOf([]), extentOf([{ key: 0, lvl: Level.Info }]), extentOf([{ key: 5000, lvl: Level.Info, marker: true }])]).toEqual([null, null, null]);
+  });
+
+  it("counts lines per bar and level, in any order, markers and lines without a time apart", () => {
     const lines = [
+      // (Kept for a filter: before a late source's older lines.)
+      { key: 12_100, lvl: Level.Info },
       { key: 10_000, lvl: Level.Info },
       { key: 10_500, lvl: Level.Error },
-      { key: 12_100, lvl: Level.Info },
       { key: 12_200, lvl: Level.Info, marker: true },
+      { key: 0, lvl: Level.Info },
       { key: 19_999, lvl: Level.Warn },
+      { key: 25_000, lvl: Level.Warn },
     ];
-    expect(histogramStep(lines, 10)).toBe(1000);
-    const h = histogram(lines, 1000)!;
-    expect(h.step).toBe(1000);
-    expect(h.start).toBe(10_000);
-    expect(h.n).toBe(10);
+    const h = histogram(lines, 1000, 0, 10, 19);
+    expect([h.lo, h.n]).toEqual([10, 10]);
     expect(Array.from(h.totals)).toEqual([2, 0, 1, 0, 0, 0, 0, 0, 0, 1]);
     expect(h.counts[0 * LEVEL_SLOTS + Level.Error]).toBe(1);
-    expect(h.max).toBe(2);
-    expect([histogramStep([], 10), histogram([], 1000)]).toEqual([null, null]);
+    expect([maxIn(h, 10, 19), maxIn(h, 11, 19), maxIn(h, 30, 40)]).toEqual([2, 1, 0]);
+    // The newest MAX_BARS at most.
+    const wide = histogram(lines, 1, 0, 0, 30_000);
+    expect([wide.lo, wide.n]).toEqual([30_000 - MAX_BARS + 1, MAX_BARS]);
+  });
+
+  it("draws bars of one width, the newest on the right: one that starts moves each a bar to the left", () => {
+    const a: Axis = { step: 1000, off: 0, right: 99, bars: 100 };
+    expect([xOfBar(a, 99, 600), xOfBar(a, 100, 600), xOfTime(a, 99_500, 600)]).toEqual([594, 600, 597]);
+    expect([barAtX(a, 599.9, 600), barAtX(a, 594, 600), barAtX(a, 593.9, 600), barAtX(a, 0, 600)]).toEqual([99, 99, 98, 0]);
+    // Off the strip: the bar at its edge.
+    expect([barAtX(a, -20, 600), barAtX(a, 700, 600)]).toEqual([0, 99]);
+    for (const b of [0, 37, 99]) expect(barAtX(a, xOfBar(a, b, 600) + 3, 600)).toBe(b);
+    const next = { ...a, right: 100 };
+    for (const b of [10, 50, 99]) expect(xOfBar(a, b, 600) - xOfBar(next, b, 600)).toBeCloseTo(6);
+  });
+
+  it("ticks at round times so far apart, saying the time of day, or the date at midnight", () => {
+    // 100 bars of a second on 600 px: a second takes 6 px, ticks come every 15 s.
+    const a: Axis = { step: 1000, off: 0, right: Date.UTC(2026, 9, 8, 10, 42, 30) / 1000, bars: 100 };
+    expect(ticks(a, 600).map((t) => t.label)).toEqual(["10:41:00", "10:41:15", "10:41:30", "10:41:45", "10:42:00", "10:42:15", "10:42:30"]);
+    expect(ticks(a, 600)[0].x).toBe(54);
+    // Hours at +5:30, 6 px each: every 12 h of the time there, the date at midnight.
+    const off = 5.5 * HOUR;
+    const b: Axis = { step: HOUR, off, right: barOf(Date.UTC(2026, 9, 8, 12), HOUR, off), bars: 100 };
+    expect(ticks(b, 600).map((t) => t.label)).toEqual(["10-05", "12:00", "10-06", "12:00", "10-07", "12:00", "10-08", "12:00"]);
+    // Bars of 4 days: ticks on their edges, dates.
+    const c: Axis = { step: 4 * DAY, off: 0, right: 5000, bars: 100 };
+    const days = ticks(c, 600);
+    expect(days.length).toBeGreaterThan(3);
+    for (const t of days) expect([t.label.length, (t.t / DAY) % 4]).toEqual([5, 0]);
+    for (const set of [ticks(a, 600), ticks(b, 600), days]) for (let k = 1; k < set.length; k++) expect(set[k].x - set[k - 1].x).toBeGreaterThanOrEqual(72);
+  });
+
+  it("tells a bar's time as the axis does", () => {
+    const t = Date.UTC(2026, 9, 8, 8, 45, 5);
+    expect(timeOf(t, { step: 1000, off: 5.5 * HOUR, right: 0, bars: 1 })).toBe("14:15:05");
+    expect(timeOf(t, { step: DAY, off: 0, right: 0, bars: 1 })).toBe("10-08");
   });
 });
 
