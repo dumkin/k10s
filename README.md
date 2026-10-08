@@ -56,7 +56,7 @@ Press `=` on any object, and k10s compares it with the objects of the same name 
 
 ### Logs that answer questions
 
-Stream a pod, a whole deployment, or any marked pods and workloads across clusters, merged by time. The query language completes as you type: words, `"phrases"`, `!exclusions`, `/regex/`, and JSON or logfmt fields such as `status>=500`, `level>=warn` or `user=bob`. JSON logs turn into a table, and clicking a `trace_id` follows that request through every pod and cluster. **Patterns** group lines by their template and break each one down by cluster, so an error that only happens in z2 gives itself away. Crashes, OOM kills and restarts are marked in the stream. Scroll up and earlier history loads in place. A log keeps 100,000 lines in memory, and 3,000 lines a second from 16 pods in four clusters scroll without dropped frames.
+Stream a pod, a whole deployment, or any marked pods and workloads across clusters, merged by time. The query language completes as you type: words, `"phrases"`, `!exclusions`, `/regex/`, and JSON or logfmt fields such as `status>=500`, `level>=warn` or `user=bob`. JSON logs turn into a table, and clicking a `trace_id` follows that request through every pod and cluster. **Patterns** group lines by their template and break each one down by cluster, so an error that only happens in z2 gives itself away. Crashes, OOM kills and restarts are marked in the stream, and **Sources** shows which pod's lines come late, and how late. Scroll up and earlier history loads in place. A log keeps 100,000 lines in memory, and 3,000 lines a second from 16 pods in four clusters scroll without dropped frames.
 
 ### Sessions that survive a workday
 
@@ -68,7 +68,7 @@ Read-only mode is enforced by the engine on every request that would change a cl
 
 ### Small and fast at fleet scale
 
-Rows are rendered in Rust, and the UI gets them in batches, at most every 33 ms. Tables, pickers and logs are virtualized, and watches are shared between views and stay warm for three minutes by default, so going back is instant. k10s uses the system's web view instead of bundling a browser: the download is about 10 MB, and the installed app takes 19 MB. With 10,000 pods on screen it takes about 210 MB of memory and about 1% of a CPU core; Aptakube takes 1.1 GB, Freelens 715 MB and k9s 1.4 GB for the same table. A big list comes in a few pages fetched at once and read as they stream in: 100,000 namespaces in about a second, with 9 requests to the API server. See [Benchmarks](#benchmarks).
+Rows are rendered in Rust, and the UI gets them in batches, at most every 33 ms. Tables, pickers and logs are virtualized, and watches are shared between views and stay warm for three minutes by default, so going back is instant. k10s uses the system's web view instead of bundling a browser: the download is about 9 MB, and the installed app takes 22 MB. With 10,000 pods on screen it takes about 210 MB of memory and about 1% of a CPU core; Aptakube takes 1.1 GB, Freelens 715 MB and k9s 1.4 GB for the same table. A big list comes in a few pages fetched at once and read as they stream in: 100,000 namespaces in about a second, with 9 requests to the API server. See [Benchmarks](#benchmarks).
 
 ### Keyboard first, with k9s habits
 
@@ -95,7 +95,7 @@ Rows are rendered in Rust, and the UI gets them in batches, at most every 33 ms.
 
 ## Everything else you'd expect
 
-- **Every resource, CRDs included**: live tables with kubectl's columns and the CRDs' own; sorting; filtering by text and by labels, as with `kubectl -l` (`app=web`, `tier!=db`); columns you can resize and hide.
+- **Every resource, CRDs included**: live tables with kubectl's columns and the CRDs' own; sorting; filtering by text and by labels, as with `kubectl -l` (`app=web`, `tier!=db`), and the filters you used lately on `↑`; columns you can resize and hide; ⌥-click copies any cell.
 - **Details**: an Overview with containers, their environment resolved to values and sources, probes in plain words, volumes and scheduling; YAML with search; live events; a relations graph from the ingress down to the volumes; a full-screen view.
 - **Actions**: restart, scale, delete (with force), cordon and uncordon, suspend and resume, trigger a CronJob, copy names. On one row or on many.
 - **Logs and port-forwards** for pods, services and whole workloads; **shells, attach and debug containers** for pods; **node shells**.
@@ -138,8 +138,8 @@ Five popular Kubernetes clients, side by side. Checked on 2026-10-04 against eac
 | **Source** | AGPL-3.0 | Apache-2.0 | Closed | MIT | Apache-2.0 | Closed |
 | **Account** | None | None | Lens ID required | None | None | License key |
 | **Telemetry** | None¹ | None¹ | On by default | None¹ | None¹ | App version, OS, device ID and name on license and update checks |
-| **Download, macOS on Apple silicon** | ~10 MB | 39 MB | 253 MB | 200 MB | 144 MB | 33 MB |
-| **Installed, macOS** | 19 MB | 127 MB | 790 MB | 604 MB | 371 MB | 53 MB |
+| **Download, macOS on Apple silicon** | ~9 MB | 39 MB | 253 MB | 200 MB | 144 MB | 33 MB |
+| **Installed, macOS** | 22 MB | 127 MB | 790 MB | 604 MB | 371 MB | 53 MB |
 | **Several clusters in one table** | ✓ | – | – | – | ✓ | ✓ |
 | **Without the right to list namespaces** | Asks; remembered per cluster and zone group | Type it; remembered per context | List them in the cluster's settings | List them in the cluster's settings | List them in the cluster's settings | Type it; only the last one is kept |
 | **Read-only mode** | ✓ enforced by the engine | ✓ | – | – | – | – |
