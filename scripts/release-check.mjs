@@ -7,7 +7,7 @@
 // ✗ blocks the release, ⚠ needs a look. Exit code 1 when something blocks.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,22 @@ try {
   execFileSync(process.execPath, ["scripts/version.mjs", "--check", ...(version ? [version] : [])], { cwd: ROOT, stdio: "pipe" });
 } catch (e) {
   errors.push(`versions disagree:\n${e.stderr.toString().trim()}`);
+}
+
+// The release notes are this version's: the draft release takes .github/release-notes.md as it is, and 0.1.1 went out
+// with the notes of 0.1.0. The previous release is the newest tag before HEAD.
+const git = (...args) => execFileSync("git", args, { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+const previous = git("tag", "--merged", "HEAD", "--no-contains", "HEAD", "--sort=-v:refname", "--list", "v*")
+  .split("\n")
+  .find((tag) => tag && tag !== `v${version}`);
+if (previous) {
+  let before = null;
+  try {
+    before = git("show", `${previous}:.github/release-notes.md`);
+  } catch {
+    // The file isn't in that release.
+  }
+  if (before === read(".github/release-notes.md").trim()) errors.push(`.github/release-notes.md is still what ${previous} said: write this version's notes`);
 }
 
 // What the release builds = what the update feed must list = what the Homebrew cask downloads. Each target: its key in
@@ -96,15 +112,24 @@ else {
   if (days > 120) warnings.push(`the comparison table was checked ${days} days ago (${checkedEn}): re-verify the competitors`);
 }
 
-// Size claims against a release build, when there is one.
+// Size claims against a release build, when there is one. Releases also carry the license files (release-config.mjs),
+// about 2 MB a local build lacks: they are counted in from LICENSE and THIRD-PARTY-NOTICES.md.
 const app = join(ROOT, "target/release/bundle/macos/k10s.app");
-if (existsSync(app)) {
-  const kb = Number(execFileSync("du", ["-sk", app]).toString().split("\t")[0]);
-  const mb = Math.round((kb * 1024) / 1e6);
-  const claimed = Number(read("README.md").match(/the installed app takes (\d+) MB/)?.[1]);
-  if (claimed && Math.abs(claimed - mb) > 2) warnings.push(`README says the installed app takes ${claimed} MB; the release build here takes ${mb} MB`);
-} else {
+const LICENSES = ["LICENSE", "THIRD-PARTY-NOTICES.md"];
+if (!existsSync(app)) {
   notes.push("no release build in target/: app sizes in the README were not checked (npm --prefix ui run tauri build -- --bundles app)");
+} else if (!existsSync(join(ROOT, "THIRD-PARTY-NOTICES.md"))) {
+  notes.push("no THIRD-PARTY-NOTICES.md, which releases carry: app sizes in the README were not checked (node scripts/third-party-notices.mjs)");
+} else {
+  const blocksKB = (file) => Math.ceil(statSync(file).size / 4096) * 4;
+  let kb = Number(execFileSync("du", ["-sk", app]).toString().split("\t")[0]);
+  for (const f of LICENSES) if (!existsSync(join(app, "Contents/Resources", f))) kb += blocksKB(join(ROOT, f));
+  const mb = Math.round((kb * 1024) / 1e6);
+  for (const [file, pattern] of [["README.md", /the installed app takes (\d+) MB/], ["README.ru.md", /установленное приложение занимает (\d+) МБ/]]) {
+    const claimed = Number(read(file).match(pattern)?.[1]);
+    if (!claimed) warnings.push(`${file} no longer says how much the installed app takes: update release-check.mjs`);
+    else if (Math.abs(claimed - mb) > 1) warnings.push(`${file} says the installed app takes ${claimed} MB; the release build here, with its license files, takes ${mb} MB`);
+  }
 }
 
 // Relative links and images in every tracked Markdown file lead somewhere.

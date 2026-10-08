@@ -94,13 +94,13 @@ After that, every published release opens a pull request to winget-pkgs.
 
 ## Releasing a version
 
-First bring the docs up to date with the version: the README and its Russian twin, the comparison table, screenshots (and their [JPEG copies](#linux-metadata)), the keyboard and architecture docs, and the release notes in `.github/release-notes.md`. With Claude Code, the `prepare-release` skill (`.claude/skills/prepare-release/SKILL.md`) walks through all of it. Either way, `node scripts/release-check.mjs 0.2.0` catches what can be checked mechanically: versions, the platform list, placeholders, README parity, the comparison table's date, the app size, broken links, unused images, the screenshots of the Linux metadata, secrets and email addresses.
+First bring the docs up to date with the version: the README and its Russian twin, the comparison table, screenshots (and their [JPEG copies](#linux-metadata)), the keyboard and architecture docs, and the release notes in `.github/release-notes.md`. With Claude Code, the `prepare-release` skill (`.claude/skills/prepare-release/SKILL.md`) walks through all of it. Either way, `node scripts/release-check.mjs 0.2.0` catches what can be checked mechanically: versions, the platform list, placeholders, release notes left from the previous release, README parity, the comparison table's date, the app size (with the license files releases carry: run `node scripts/third-party-notices.mjs` first), broken links, unused images, the screenshots of the Linux metadata, secrets and email addresses.
 
 Then:
 
 ```bash
 node scripts/version.mjs 0.2.0
-git commit -am "Release 0.2.0"
+git commit -am "chore: release v0.2.0"
 git tag v0.2.0
 git push origin main v0.2.0
 ```
