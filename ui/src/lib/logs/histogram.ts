@@ -4,9 +4,11 @@ import type { Level } from "./parse";
 // Log volume over time, by level: how many lines each stretch of time (a bar) holds. Bars are round lengths of time
 // (1s, 5s, 1m, 15m…) from midnight, so their edges read well, and they are a tape: all as wide, the newest on the
 // right. A bar that starts moves the others one bar to the left; the step changes only when the lines no longer fit
-// (or fit in far fewer bars again).
+// (or fit in far fewer bars again). Bars are cut by one time zone offset, the newest line's: across a change to or
+// from summer time, those before it are an hour off midnight — what they say is each moment's own time.
 
 const SECOND = 1000;
+const MINUTE = 60 * SECOND;
 const DAY = 86_400 * SECOND;
 /** Bar lengths to choose from (longer ones: whole days). */
 export const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].map((s) => s * SECOND);
@@ -35,24 +37,6 @@ export const barOf = (t: number, step: number, off: number) => Math.floor((t + o
 /** When a bar starts. */
 export const barStart = (b: number, step: number, off: number) => b * step - off;
 
-/**
- * The time lines (in time order) cover: from the first that has a time to the last that is no marker (markers are
- * placed by this computer's clock, which may run ahead of the cluster's). Null when there is no such line.
- */
-export function extentOf(lines: readonly Timed[]): [number, number] | null {
-  // (Lines without a time before any that has one have key 0: they come first.)
-  let lo = 0;
-  let hi = lines.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (lines[mid].key < 1) lo = mid + 1;
-    else hi = mid;
-  }
-  let last = lines.length - 1;
-  while (last >= lo && lines[last].marker) last--;
-  return last >= lo ? [lines[lo].key, Math.max(lines[lo].key, lines[last].key)] : null;
-}
-
 /** How many bars of `step` the time from `first` to `last` takes. */
 const barsOf = (first: number, last: number, step: number, off: number) => barOf(last, step, off) - barOf(first, step, off) + 1;
 
@@ -75,11 +59,9 @@ export function tapeStep(first: number, last: number, bars: number, off: number,
 }
 
 export interface Histogram {
-  /** The first bar counted (see `barOf`), how many there are, and their step and offset. */
+  /** The first bar counted (see `barOf`), and how many there are. */
   lo: number;
   n: number;
-  step: number;
-  off: number;
   /** Per bar, per level: `counts[(bar - lo) * LEVEL_SLOTS + level]`. */
   counts: Uint32Array;
   /** Lines in each bar. */
@@ -103,7 +85,7 @@ export function histogram(lines: readonly Timed[], step: number, off: number, lo
     counts[b * LEVEL_SLOTS + l.lvl]++;
     totals[b]++;
   }
-  return { lo: from, n, step, off, counts, totals };
+  return { lo: from, n, counts, totals };
 }
 
 /** The most lines a bar from `lo` to `hi` holds. */
@@ -113,30 +95,64 @@ export function maxIn(h: Histogram, lo: number, hi: number): number {
   return max;
 }
 
-/** The bars drawn: `bars` of them across the strip, of `step` (with `off`, see `barOf`), bar `right` the last. */
+/**
+ * The line to go to for a stretch of time `t0`…`t1`: its first, else the nearest (the one before it on a tie). In any
+ * order, as views are (see `histogram`).
+ */
+export function nearestIn<T extends Timed>(lines: readonly T[], t0: number, t1: number): T | undefined {
+  let best: T | undefined;
+  let far = Infinity;
+  for (const l of lines) {
+    const d = l.key < t0 ? t0 - l.key : l.key >= t1 ? l.key - t1 + 1 : 0;
+    if (d < far || (d === 0 && far === 0 && l.key < best!.key)) {
+      best = l;
+      far = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * The bars drawn: `bars` of them across the strip, of `step` (with `off`, see `barOf`), bar `right` the last. Times
+ * are told in UTC or local time (`utc`).
+ */
 export interface Axis {
   step: number;
   off: number;
   right: number;
   bars: number;
+  utc: boolean;
 }
 
 /** The first bar drawn. */
 export const leftOf = (a: Axis) => a.right - a.bars + 1;
-/** Where a bar starts on a strip `w` pixels wide. */
+/** Where a bar starts on a strip `w` pixels wide (a fraction of a bar: that far into it). */
 export const xOfBar = (a: Axis, b: number, w: number) => ((b - leftOf(a)) * w) / a.bars;
 /** Where a time is on it (before 0 or past `w`: off the strip). */
-export const xOfTime = (a: Axis, t: number, w: number) => (((t + a.off) / a.step - leftOf(a)) * w) / a.bars;
+export const xOfTime = (a: Axis, t: number, w: number) => xOfBar(a, (t + a.off) / a.step, w);
 /** The bar at `x` (the nearest one, off the strip). */
 export const barAtX = (a: Axis, x: number, w: number) => leftOf(a) + Math.max(0, Math.min(a.bars - 1, Math.floor((x / w) * a.bars)));
+/** Bars `from`…`to` (either way round): where they are on the strip, [left, width]… */
+export const spanX = (a: Axis, from: number, to: number, w: number) => {
+  const x0 = xOfBar(a, Math.min(from, to), w);
+  return [x0, xOfBar(a, Math.max(from, to) + 1, w) - x0] as const;
+};
+/** …and the time they cover, [from, to). */
+export const spanTime = (a: Axis, from: number, to: number) => [barStart(Math.min(from, to), a.step, a.off), barStart(Math.max(from, to) + 1, a.step, a.off)] as const;
+/** Whether a stretch of time lies wholly outside a range. */
+export const outside = (range: readonly [number, number] | null, t0: number, t1: number) => !!range && (t1 <= range[0] || t0 >= range[1]);
 
-/** A time as the axis tells it: the time of day to the second, or the date (10-08) for bars of a day or longer. */
-export const timeOf = (t: number, a: Axis) => (a.step >= DAY ? dayOf(t + a.off, true).slice(5) : clockOf(t + a.off, true).slice(0, 8));
+/** A bar's date, as the axis cuts days (10-08). */
+const dateOf = (t: number, a: Axis) => dayOf(t + a.off, true).slice(5);
+/** A time of day, as the lines and the range picked tell it (10:42, or 10:42:05 with seconds). */
+const clockAt = (t: number, a: Axis, seconds: boolean) => clockOf(t, a.utc).slice(0, seconds ? 8 : 5);
+
+/** A time as the axis tells it: the time of day to the second, or the date for bars of a day or longer. */
+export const timeOf = (t: number, a: Axis) => (a.step >= DAY ? dateOf(t, a) : clockAt(t, a, true));
 
 export interface Tick {
-  /** Where it is (pixels), its time, and what it says. */
+  /** Where it is (pixels), and what it says. */
   x: number;
-  t: number;
   label: string;
 }
 
@@ -152,9 +168,8 @@ export function ticks(a: Axis, w: number, minPx = 72): Tick[] {
   const to = barStart(a.right + 1, a.step, a.off);
   const out: Tick[] = [];
   for (let t = Math.ceil((from + a.off) / every) * every - a.off; t < to; t += every) {
-    const local = t + a.off;
-    const label = every >= DAY || local % DAY === 0 ? dayOf(local, true).slice(5) : clockOf(local, true).slice(0, every < 60 * SECOND ? 8 : 5);
-    out.push({ x: xOfTime(a, t, w), t, label });
+    const date = every >= DAY || (t + a.off) % DAY === 0;
+    out.push({ x: xOfTime(a, t, w), label: date ? dateOf(t, a) : clockAt(t, a, every < MINUTE) });
   }
   return out;
 }

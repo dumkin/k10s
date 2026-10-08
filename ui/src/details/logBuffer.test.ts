@@ -415,6 +415,57 @@ describe("LogBuffer", () => {
     expect(b.view(errors, true).every((l, k, all) => k === 0 || all[k - 1].pos < l.pos)).toBe(true);
   });
 
+  it("tells the time its entries cover: from the first that has a time to the newest that is no marker", () => {
+    const b = new LogBuffer();
+    expect(b.extent(false, null)).toBeNull();
+    // A line with no time before any that has one, and a marker on this computer's clock, past the lines.
+    b.add([
+      [0, null, "no time yet"],
+      [0, 5000, "a"],
+      [0, 9000, "b"],
+    ]);
+    b.mark(0, "container terminated", Level.Warn, 60_000);
+    expect(b.extent(false, null)).toEqual([5000, 9000]);
+  });
+
+  it("tells a paused view's time: up to the newest entry that came by then, earlier lines read since included", () => {
+    const b = new LogBuffer();
+    b.add([
+      [0, 1000, "a"],
+      [0, 2000, "b"],
+    ]);
+    const paused = b.seq - 1;
+    b.add([
+      [0, 3000, "after the pause"],
+      [1, 1500, "late, after it too"],
+    ]);
+    expect([b.extent(false, null), b.extent(false, paused)]).toEqual([
+      [1000, 3000],
+      [1000, 2000],
+    ]);
+    // Paused before anything came: nothing, until earlier lines are read (a pause shows them).
+    const c = new LogBuffer();
+    const none = c.seq - 1;
+    c.add([[0, 3000, "after"]]);
+    expect(c.extent(false, none)).toBeNull();
+    c.addEarlier([[0, 1000, "earlier"]]);
+    expect(c.extent(false, none)).toEqual([1000, 1000]);
+  });
+
+  it("tells the kept entries' time too, in whatever order they were dropped", () => {
+    // Full, a filter showing everything: a source whose older lines come late gets them kept after newer ones.
+    const b = new LogBuffer(1e9, 20);
+    const all: Filter = { key: "all", test: () => true };
+    b.keep = () => all;
+    b.add(Array.from({ length: 30 }, (_, k): LogLine => [0, (100 + k) * 1000, `app ${100 + k}`]));
+    b.add(Array.from({ length: 5 }, (_, k): LogLine => [1, (50 + k) * 1000, `sidecar ${50 + k}`]));
+    expect(b.kept.map((l) => l.key / 1000)).toEqual([117, 118, 119, 120, 121, 50, 51, 52, 53, 54]);
+    expect([b.extent(true, null), b.extent(false, null)]).toEqual([
+      [50_000, 129_000],
+      [122_000, 129_000],
+    ]);
+  });
+
   it("counts the entries of each source as they come and go", () => {
     const b = new LogBuffer(1e9, 10);
     b.add(Array.from({ length: 30 }, (_, k): LogLine => [k % 3, k, `l${k}`]));

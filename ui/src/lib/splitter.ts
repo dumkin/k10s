@@ -1,3 +1,5 @@
+import { trackDrag } from "./drag";
+
 /**
  * The keys of a resize handle (a window splitter, as WAI-ARIA has it): the arrows along its axis move it 16px (64px
  * with ⇧), Home / End to the smallest and the largest size. `grow` / `shrink` name the arrow keys that make the
@@ -39,9 +41,8 @@ export interface SplitterDragSpec extends Omit<SplitterSpec, "shrink"> {
  * Drags a resize handle, from a `mousedown` or `pointerdown` on it with the primary button: the size follows the
  * pointer from where it took the handle, within the bounds, and shows at most once a frame — mouse events come faster
  * than frames, and WebKit lays the window out before each one when something changed since. The drag ends when the
- * button is let go, or with what takes the release from the page: a context menu (a ctrl-click on macOS), another
- * window. Not when a move says no button is held: WebKit takes that from the system's state of the mouse, which
- * events handed to the window by software do not change. The handle has `.dragging` meanwhile.
+ * button is let go, or with what takes the release from the page (see `trackDrag`); the size then is the one set. The
+ * handle has `.dragging` meanwhile.
  */
 export function splitterDrag(spec: SplitterDragSpec) {
   return (e: MouseEvent) => {
@@ -51,36 +52,27 @@ export function splitterDrag(spec: SplitterDragSpec) {
     const vertical = spec.grow === "ArrowUp" || spec.grow === "ArrowDown";
     const sign = spec.grow === "ArrowRight" || spec.grow === "ArrowDown" ? 1 : -1;
     const along = (ev: MouseEvent) => (vertical ? ev.clientY : ev.clientX);
-    const [moves, ends] = e.type === "pointerdown" ? (["pointermove", "pointerup"] as const) : (["mousemove", "mouseup"] as const);
     const from = along(e);
     const start = spec.value();
     const show = spec.preview ?? spec.set;
     let size = start;
     let moved = false;
     let frame = 0;
-    const move = (ev: MouseEvent) => {
-      size = Math.round(Math.max(spec.min(), Math.min(spec.max(), start + sign * (along(ev) - from))));
-      moved = true;
-      frame ||= requestAnimationFrame(() => {
-        frame = 0;
-        show(size);
-      });
-    };
-    const end = () => {
-      cancelAnimationFrame(frame);
-      handle.classList.remove("dragging");
-      window.removeEventListener(moves, move);
-      window.removeEventListener(ends, end);
-      window.removeEventListener("pointercancel", end);
-      window.removeEventListener("contextmenu", end, true);
-      window.removeEventListener("blur", end);
-      if (moved) spec.set(size);
-    };
     handle.classList.add("dragging");
-    window.addEventListener(moves, move);
-    window.addEventListener(ends, end);
-    window.addEventListener("pointercancel", end);
-    window.addEventListener("contextmenu", end, true);
-    window.addEventListener("blur", end);
+    trackDrag(e, {
+      move: (ev) => {
+        size = Math.round(Math.max(spec.min(), Math.min(spec.max(), start + sign * (along(ev) - from))));
+        moved = true;
+        frame ||= requestAnimationFrame(() => {
+          frame = 0;
+          show(size);
+        });
+      },
+      end: () => {
+        cancelAnimationFrame(frame);
+        handle.classList.remove("dragging");
+        if (moved) spec.set(size);
+      },
+    });
   };
 }

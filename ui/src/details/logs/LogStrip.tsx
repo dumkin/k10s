@@ -1,20 +1,26 @@
-import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../../components/Icon";
+import { trackDrag } from "../../lib/drag";
 import { count } from "../../lib/format";
-import { withKeys } from "../../lib/hotkeys";
+import { bind, withKeys } from "../../lib/hotkeys";
 import { clockOf, gapOf } from "../../lib/logs/format";
-import { type Axis, barAtX, barOf, barStart, extentOf, histogram, LEVEL_SLOTS, leftOf, maxIn, offsetAt, tapeStep, ticks, timeOf, xOfBar, xOfTime } from "../../lib/logs/histogram";
+import { type Axis, barAtX, barOf, type Histogram, histogram, LEVEL_SLOTS, leftOf, maxIn, nearestIn, offsetAt, outside, spanTime, spanX, tapeStep, ticks, timeOf, xOfBar, xOfTime } from "../../lib/logs/histogram";
 import { Level, LEVEL_NAME, LEVELS } from "../../lib/logs/parse";
-import { indexAtKey, type Line } from "../logBuffer";
+import type { Line } from "../logBuffer";
 import type { LogCtx } from "./LogViewer";
 import { behindText, histogramOpen, setHistogramOpen, utc } from "./model";
 import { createPasses } from "./passes";
 
 const H = 46;
-/** The bars' height: the ticks and their times go under them (`.lhist-seen` and the rest leave them out). */
+/** The bars' height: the ticks and their times go under them (the marks over the bars are as high). */
 const BARS_H = 32;
 /** Pixels a bar takes at least (with its gap). */
 const BAR = 5;
+/**
+ * A pointer resting on the bars holds them this long after it last moved; then they go on (it is not reading them: the
+ * keys took over, another app did). A drag holds them until it ends. (Tests: less.)
+ */
+export const hover = { holdMs: 3000 };
 
 const LEVEL_VAR: Record<Level, string> = {
   [Level.Error]: "--err",
@@ -52,6 +58,16 @@ export function LogStrip(props: { ctx: LogCtx }) {
     for (const l of passes.lines()) if (!l.marker) n[l.lvl]++;
     return n;
   });
+  // The stream the lines are of: another one once the view is cleared or starts over — the histogram starts afresh.
+  let streamLines: Line[] | undefined;
+  const stream = createMemo<number>((n) => {
+    c.version();
+    const lines = c.buffer().lines;
+    if (lines === streamLines) return n;
+    streamLines = lines;
+    return n + 1;
+  }, 0);
+  const memory: StepMemory = { stream: 0, step: null };
 
   const rate = c.rate;
 
@@ -125,20 +141,26 @@ export function LogStrip(props: { ctx: LogCtx }) {
           <Icon name="bars" size={12} />
         </button>
       </div>
-      <Show when={histogramOpen() && c.roomy()}>
-        <Bars ctx={c} lines={passes.lines} />
+      <Show when={histogramOpen() && c.roomy() && stream()} keyed>
+        {(n) => <Bars ctx={c} lines={passes.lines} stream={n} memory={memory} />}
       </Show>
     </div>
   );
 }
 
+/** The histogram's step while its bars are hidden (a dock tab not shown, a view too short): shown again, they go on with it. */
+interface StepMemory {
+  stream: number;
+  step: number | null;
+}
+
 /**
  * The histogram, a tape of time (see lib/logs/histogram): bars of one width, the newest on the right. It covers the time
- * of the lines the view holds, whatever the filters show: they make the bars lower, they do not move them. Under the
- * pointer the bars hold still (their heights keep up, the bars that start meanwhile wait), so what is pointed at is
- * what is picked.
+ * of the lines the view holds (see `LogBuffer.extent`), whatever the filters let through: they make the bars lower, they
+ * do not move them. Under the pointer the bars hold still (their heights keep up, the bars that start meanwhile wait),
+ * so what is pointed at is what is picked. One stream's: another one (the view cleared, started over) gets its own.
  */
-function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
+function Bars(props: { ctx: LogCtx; lines: () => Line[]; stream: number; memory: StepMemory }) {
   const c = props.ctx;
   let canvas!: HTMLCanvasElement;
   let box!: HTMLDivElement;
@@ -148,7 +170,7 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
   let left = 0;
   onMount(() => {
     const ro = new ResizeObserver(() => {
-      // (A dock tab not shown is 0 wide: the bars stay as they were.)
+      // (Not laid out, 0 wide: the bars stay as they were.)
       if (box.clientWidth > 0) setW(box.clientWidth);
       left = box.getBoundingClientRect().left;
     });
@@ -157,62 +179,48 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
   });
   const bars = () => Math.max(1, Math.floor(w() / BAR));
 
-  // The time the lines cover: those the buffer holds, and those it keeps for the filters while the view shows them.
-  // (Worked out once a pass, when the lines are counted.)
-  const timeline = createMemo<readonly [number, number] | null>(
-    () => {
-      props.lines();
-      const buf = c.buffer();
-      const held = extentOf(buf.lines);
-      const kept = c.withKept() ? extentOf(buf.kept) : null;
-      return held && kept ? [Math.min(held[0], kept[0]), Math.max(held[1], kept[1])] : (held ?? kept);
-    },
-    null,
-    { equals: (a, b) => a === b || (!!a && !!b && a[0] === b[0] && a[1] === b[1]) },
-  );
-  /** The stream's lines (another array once the view is cleared or starts over): the step and the hold of others are not theirs. */
-  const epoch = createMemo(() => (props.lines(), c.buffer().lines));
-  // Paused, the lines that come are not shown: the tape stops where it was.
-  const pausedLast = createMemo(on(c.pausedAt, (p) => (p === null ? null : (untrack(timeline)?.[1] ?? null))));
+  // As lines come (not only those the filters let through), and when the filters or a pause change what is shown.
+  const timeline = createMemo(() => (c.version(), c.buffer().extent(c.withKept(), c.pausedAt())), null, {
+    equals: (a, b) => a === b || (!!a && !!b && a[0] === b[0] && a[1] === b[1]),
+  });
   const off = createMemo(() => offsetAt(timeline()?.[1] ?? Date.now(), utc()));
   /** The step the lines call for, as of the one before. */
-  const free = createMemo<{ step: number; epoch: Line[] } | null>((prev) => {
+  const free = createMemo<number | null>((prev) => {
     const t = timeline();
-    if (!t || !w()) return null;
-    const e = epoch();
-    const step = tapeStep(t[0], t[1], bars(), off(), prev?.epoch === e ? prev.step : null);
-    return prev?.epoch === e && prev.step === step ? prev : { step, epoch: e };
-  }, null);
-  /** Held under the pointer: the step, and the newest time drawn. */
-  const [held, setHeld] = createSignal<{ step: number; last: number; epoch: Line[] } | null>(null);
-  const holding = () => {
-    const h = held();
-    return h && h.epoch === epoch() ? h : null;
-  };
-  const step = createMemo(() => holding()?.step ?? free()?.step ?? 0);
-  /** The newest time drawn (0: nothing to draw). */
-  const edge = createMemo(() => {
-    const t = timeline();
-    return t ? Math.min(holding()?.last ?? t[1], pausedLast() ?? Infinity) : 0;
+    return t && w() ? tapeStep(t[0], t[1], bars(), off(), prev) : prev;
+  }, props.memory.stream === props.stream ? props.memory.step : null);
+  createEffect(() => {
+    props.memory.stream = props.stream;
+    props.memory.step = free();
   });
+  /** Held while the pointer is over the bars or drags: the step, the offset and the newest time drawn. */
+  const [held, setHeld] = createSignal<{ step: number; off: number; last: number } | null>(null);
   const axis = createMemo<Axis | null>(
     () => {
-      const s = step();
-      const t = edge();
-      return s && t ? { step: s, off: off(), right: barOf(t, s, off()), bars: bars() } : null;
+      const h = held();
+      const t = timeline();
+      const step = h?.step ?? free();
+      if (!t || !step) return null;
+      const o = h?.off ?? off();
+      return { step, off: o, right: barOf(h?.last ?? t[1], step, o), bars: bars(), utc: utc() };
     },
     null,
-    { equals: (a, b) => a === b || (!!a && !!b && a.step === b.step && a.off === b.off && a.right === b.right && a.bars === b.bars) },
+    { equals: (a, b) => a === b || (!!a && !!b && a.step === b.step && a.off === b.off && a.right === b.right && a.bars === b.bars && a.utc === b.utc) },
   );
-  // Counted again when the lines or the step change: not as the strip is resized, nor as the pointer comes and goes.
+  /** The bars counted: all the lines' (those a hold keeps past the right edge are counted already when it ends). */
+  const counted = createMemo(
+    () => {
+      const a = axis();
+      const t = timeline();
+      return a && t ? { step: a.step, off: a.off, lo: barOf(t[0], a.step, a.off), hi: barOf(t[1], a.step, a.off) } : null;
+    },
+    null,
+    { equals: (a, b) => a === b || (!!a && !!b && a.step === b.step && a.off === b.off && a.lo === b.lo && a.hi === b.hi) },
+  );
+  // Counted again when the lines or those bars change: not as the strip is resized, nor as the pointer comes and goes.
   const hist = createMemo(() => {
-    const lines = props.lines();
-    const s = step();
-    const t = timeline();
-    const last = edge();
-    if (!s || !t || !last) return null;
-    const o = off();
-    return histogram(lines, s, o, barOf(t[0], s, o), barOf(last, s, o));
+    const b = counted();
+    return b && histogram(props.lines(), b.step, b.off, b.lo, b.hi);
   });
 
   // The bars are drawn again when they change (at most a few times a second), not as the screen moves over them:
@@ -232,7 +240,8 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
     const t = theme();
     const hidden = c.levels();
     const range = c.range();
-    const first = timeline()?.[0];
+    // (The first bar's, not the first line's time: that moves with every line that comes.)
+    const first = counted()?.lo;
     let pal = palette;
     if (!pal || pal.theme !== t) {
       const css = getComputedStyle(canvas);
@@ -257,34 +266,32 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
     if (!g) return;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, width, H);
-    if (!h || !a || !width) return;
+    if (!h || !a || first === undefined) return;
     // Edges on the screen's pixels: a bar's width is a fraction of one.
     const px = (x: number) => Math.round(x * dpr) / dpr;
     const lo = leftOf(a);
     // The line under the bars starts at the first line held: before it, nothing was read (not: nothing was written).
-    if (first !== undefined) {
-      const x0 = px(Math.max(0, xOfBar(a, barOf(first, a.step, a.off), width)));
-      g.fillStyle = pal.line;
-      g.fillRect(x0, BARS_H, width - x0, 1);
-    }
+    const x0 = px(Math.max(0, xOfBar(a, first, width)));
+    g.fillStyle = pal.line;
+    g.fillRect(x0, BARS_H, width - x0, 1);
     const max = maxIn(h, lo, a.right);
     const gap = width / a.bars > 4 ? 1 : 0;
     if (max)
       for (let b = Math.max(lo, h.lo), end = Math.min(a.right, h.lo + h.n - 1); b <= end; b++) {
         const k = b - h.lo;
         if (!h.totals[k]) continue;
-        const x0 = px(xOfBar(a, b, width));
-        const bw = Math.max(1 / dpr, px(xOfBar(a, b + 1, width)) - x0 - gap);
-        const t0 = barStart(b, a.step, a.off);
-        const outside = range && (t0 + a.step <= range[0] || t0 >= range[1]);
+        const left = px(xOfBar(a, b, width));
+        const bw = Math.max(1 / dpr, px(xOfBar(a, b + 1, width)) - left - gap);
+        const [t0, t1] = spanTime(a, b, b);
+        const out = outside(range, t0, t1);
         let y = BARS_H;
         for (let s = 0; s < STACK.length; s++) {
           const n = h.counts[k * LEVEL_SLOTS + STACK[s]];
           if (!n) continue;
           const bh = Math.max(1, (n / max) * (BARS_H - 3));
-          g.globalAlpha = hidden.has(STACK[s]) ? 0.15 : outside ? 0.3 : 0.85;
+          g.globalAlpha = hidden.has(STACK[s]) ? 0.15 : out ? 0.3 : 0.85;
           g.fillStyle = pal.fill[s];
-          g.fillRect(x0, y - bh, bw, bh);
+          g.fillRect(left, y - bh, bw, bh);
           y -= bh;
         }
       }
@@ -302,15 +309,6 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
       g.fillText(tick.label, Math.max(half, Math.min(width - half, x)), H - 1);
     }
   });
-  /** Where the screen is: [left, width] in pixels. */
-  const seen = createMemo<readonly [number, number] | null>(() => {
-    const a = axis();
-    const at = c.onScreen();
-    const width = w();
-    if (!a || !at || !width) return null;
-    const x0 = Math.max(0, Math.min(width, xOfTime(a, at[0], width)));
-    return [x0, Math.max(x0, Math.min(width, xOfTime(a, at[1], width))) - x0];
-  });
 
   /** The pointer's x on the strip (null: not over it), and a drag over the bars (from one bar to another). */
   const [hoverX, setHoverX] = createSignal<number | null>(null);
@@ -319,12 +317,41 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
   const hovered = createMemo(() => {
     const a = axis();
     const x = hoverX();
-    return a && x !== null && w() ? barAtX(a, x, w()) : null;
+    return a && x !== null ? barAtX(a, x, w()) : null;
   });
-  let pending: number | null = null;
-  let moved = false;
+  /** Where the screen is, the bar lit and the bars a drag goes over: [left, width] in pixels. */
+  const seen = createMemo(() => {
+    const a = axis();
+    const at = c.onScreen();
+    if (!a || !at) return null;
+    // (Past the right edge, while the bars are held: at it, 2 px wide.)
+    const x0 = Math.max(0, Math.min(w() - 2, xOfTime(a, at[0], w())));
+    return [x0, Math.max(x0, Math.min(w(), xOfTime(a, at[1], w()))) - x0] as const;
+  });
+  const lit = createMemo(() => {
+    const a = axis();
+    const b = hovered();
+    return a && b !== null && !drag() ? spanX(a, b, b, w()) : null;
+  });
+  const brush = createMemo(() => {
+    const a = axis();
+    const d = drag();
+    return a && d ? spanX(a, d.from, d.to, w()) : null;
+  });
+  const tip = createMemo(() => {
+    const a = axis();
+    const h = hist();
+    const x = hoverX();
+    const d = drag();
+    const b = hovered();
+    if (!a || !h || x === null || b === null || d?.moved === false) return null;
+    const [t0, t1] = d ? spanTime(a, d.from, d.to) : spanTime(a, b, b);
+    return { x, text: `${timeOf(t0, a)}–${timeOf(t1, a)} · ${d ? gapOf(t1 - t0) : levelsIn(h, b)}` };
+  });
+
+  let pending = 0;
   let frame = 0;
-  /** The pointer is over the strip (as its enter and leave say: a pointer captured by it stays over it). */
+  /** The pointer is over the strip, as its enter and leave say. */
   let over = false;
   /** Moves show once a frame: they come faster, and WebKit lays the page out before each one that follows a change. */
   const pointAt = (x: number) => {
@@ -335,135 +362,95 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
       const d = drag();
       batch(() => {
         setHoverX(pending);
-        if (d && a && pending !== null) {
+        if (a && d) {
           const to = barAtX(a, pending, w());
-          if (to !== d.to || moved !== d.moved) setDrag({ from: d.from, to, moved });
+          if (to !== d.to) setDrag({ ...d, to });
         }
       });
     });
   };
-  const xOf = (e: PointerEvent) => e.clientX - left;
+  let resting: ReturnType<typeof setTimeout> | undefined;
+  /** The pointer moved, or pressed: the bars hold still — for a while once it rests. */
   const hold = () => {
-    const s = step();
-    if (s && !holding()) setHeld({ step: s, last: edge(), epoch: epoch() });
+    clearTimeout(resting);
+    resting = setTimeout(() => !drag() && setHeld(null), hover.holdMs);
+    const a = axis();
+    const t = timeline();
+    if (a && t && !held()) setHeld({ step: a.step, off: a.off, last: t[1] });
   };
   const away = () => {
     cancelAnimationFrame(frame);
     frame = 0;
+    clearTimeout(resting);
     batch(() => {
       setHoverX(null);
       if (!drag()) setHeld(null);
     });
   };
-  /** To the first line of a bar, or the nearest shown if none of its lines is; a bar left out of the time picked shows all the time again. */
-  const goTo = (b: number) => {
-    const a = axis();
-    if (!a) return;
-    const t0 = barStart(b, a.step, a.off);
-    const t1 = t0 + a.step;
-    const r = c.range();
-    if (r && (t1 <= r[0] || t0 >= r[1])) c.setRange(null);
-    const lines = c.shown();
-    const k = indexAtKey(lines, t0);
-    const after = lines[k];
-    const before = lines[k - 1];
-    const l = after && (after.key < t1 || !before || after.key - t1 < t0 - before.key) ? after : before;
-    if (!l) return;
-    c.select(l);
-    c.reveal(l);
+  /**
+   * To the first line of a bar, or the nearest shown if none of its lines is. A bar outside the time picked shows all the
+   * time again — but one of lines kept for the filters, which no view shows without a filter, gets its own time picked.
+   */
+  const goTo = (a: Axis, b: number) => {
+    const [t0, t1] = spanTime(a, b, b);
+    if (outside(c.range(), t0, t1)) {
+      const first = nearestIn(c.base(), t0, t1);
+      batch(() => {
+        c.setRange(null);
+        if (first?.kept && first.key >= t0 && first.key < t1 && !c.withKept()) c.setRange([t0, t1]);
+      });
+    }
+    const l = nearestIn(c.shown(), t0, t1);
+    if (l) c.select(l, true);
   };
   let stopDrag: (() => void) | undefined;
   onCleanup(() => {
     stopDrag?.();
     cancelAnimationFrame(frame);
+    clearTimeout(resting);
   });
   /** A drag ends: let go of (a click, or the time picked), or taken away (Escape, a context menu, another window). */
-  const finish = (e: PointerEvent | null) => {
+  const finish = (e: MouseEvent | null) => {
     stopDrag?.();
     cancelAnimationFrame(frame);
     frame = 0;
     const d = drag();
     const a = axis();
     setDrag(null);
-    if (!e) {
-      // (Taken away past the strip, which said so as the pointer left it: the bars move on.)
-      if (!over) away();
-      return;
+    if (d && a && e) {
+      const to = barAtX(a, e.clientX - left, w());
+      if (d.moved) c.setRange(spanTime(a, d.from, to));
+      else goTo(a, d.from);
     }
-    if (!d || !a) return;
-    const to = barAtX(a, xOf(e), w());
-    if (moved) {
-      const [from, last] = d.from <= to ? [d.from, to] : [to, d.from];
-      c.setRange([barStart(from, a.step, a.off), barStart(last + 1, a.step, a.off)]);
-    } else goTo(d.from);
-    // Let go of away from the strip: the bars move on.
-    const r = box.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) away();
+    // Let go of, or taken away, past the strip: the bars move on (over it, once the pointer rests a while).
+    if (!over) away();
+    else hold();
   };
-  // The window hears the drag through (also past the strip). It does not end when a move says no button is held:
-  // WebKit takes that from the system's state of the mouse, which events handed to the window by software leave at none.
   const down = (e: PointerEvent) => {
     const a = axis();
     if (!a || e.button !== 0 || stopDrag) return;
+    // (Nothing gets selected on the way, and the keys stay where they were: with the lines.)
+    e.preventDefault();
     left = box.getBoundingClientRect().left;
     hold();
-    const from = barAtX(a, xOf(e), w());
+    const from = barAtX(a, e.clientX - left, w());
     const x0 = e.clientX;
-    moved = false;
-    setDrag({ from, to: from, moved });
-    try {
-      box.setPointerCapture?.(e.pointerId);
-    } catch {
-      // (Not a pointer the page may capture: the window hears it anyway.)
-    }
-    const move = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - x0) > 3) moved = true;
-      pointAt(xOf(ev));
-    };
-    const up = (ev: PointerEvent) => finish(ev);
-    const cancel = () => finish(null);
-    const escape = (ev: KeyboardEvent) => {
-      if (ev.key !== "Escape") return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      cancel();
-    };
+    setDrag({ from, to: from, moved: false });
+    const stopTracking = trackDrag(e, {
+      move: (ev) => {
+        if (drag()?.moved === false && Math.abs(ev.clientX - x0) > 3) setDrag((d) => d && { ...d, moved: true });
+        pointAt(ev.clientX - left);
+      },
+      end: finish,
+    });
+    // Escape takes the drag back, before what Escape does elsewhere (it would close the details the log is in).
+    const unbind = bind({ combo: "escape", inInputs: true, priority: 400, run: () => finish(null) });
     stopDrag = () => {
       stopDrag = undefined;
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", cancel);
-      window.removeEventListener("contextmenu", cancel, true);
-      window.removeEventListener("blur", cancel);
-      window.removeEventListener("keydown", escape, true);
+      stopTracking();
+      unbind();
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", cancel);
-    window.addEventListener("contextmenu", cancel, true);
-    window.addEventListener("blur", cancel);
-    window.addEventListener("keydown", escape, true);
   };
-
-  const tip = createMemo(() => {
-    const a = axis();
-    const h = hist();
-    const x = hoverX();
-    const d = drag();
-    const b = hovered();
-    if (!a || !h || x === null || b === null) return null;
-    if (d) {
-      if (!d.moved) return null;
-      const t0 = barStart(Math.min(d.from, d.to), a.step, a.off);
-      const t1 = barStart(Math.max(d.from, d.to) + 1, a.step, a.off);
-      return { x, text: `${timeOf(t0, a)}–${timeOf(t1, a)} · ${gapOf(t1 - t0)}` };
-    }
-    const k = b - h.lo;
-    const at = (l: Level) => (k >= 0 && k < h.n ? h.counts[k * LEVEL_SLOTS + l] : 0);
-    const parts = STACK.filter((l) => at(l) > 0).map((l) => `${count(at(l))} ${plural(l, at(l))}`);
-    const t0 = barStart(b, a.step, a.off);
-    return { x, text: `${timeOf(t0, a)}–${timeOf(t0 + a.step, a)} · ${parts.length ? parts.join(", ") : "nothing"}` };
-  });
 
   return (
     <div
@@ -473,11 +460,11 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
         over = true;
         left = box.getBoundingClientRect().left;
         hold();
-        pointAt(xOf(e));
+        pointAt(e.clientX - left);
       }}
       onPointerMove={(e) => {
         hold();
-        pointAt(xOf(e));
+        pointAt(e.clientX - left);
       }}
       onPointerLeave={() => {
         over = false;
@@ -486,22 +473,13 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
       onPointerDown={down}
     >
       <canvas ref={canvas} style={{ width: "100%", height: `${H}px` }} />
-      <Show when={seen()}>{(at) => <div class="lhist-seen" style={{ left: `${at()[0]}px`, width: `max(2px, ${at()[1]}px)` }} />}</Show>
-      <Show when={!drag() && hovered() !== null && axis()}>{(a) => <div class="lhist-hover" style={{ left: `${xOfBar(a(), hovered() ?? 0, w())}px`, width: `${w() / a().bars}px` }} />}</Show>
-      <Show when={drag() && axis()}>
-        {(a) => {
-          const span = () => {
-            const d = drag() ?? { from: 0, to: 0 };
-            const x0 = xOfBar(a(), Math.min(d.from, d.to), w());
-            return [x0, xOfBar(a(), Math.max(d.from, d.to) + 1, w()) - x0] as const;
-          };
-          return <div class="lhist-brush" style={{ left: `${span()[0]}px`, width: `${span()[1]}px` }} />;
-        }}
-      </Show>
+      <Show when={seen()}>{(r) => <div class="lhist-seen" style={{ left: `${r()[0]}px`, width: `max(2px, ${r()[1]}px)`, height: `${BARS_H}px` }} />}</Show>
+      <Show when={lit()}>{(r) => <div class="lhist-hover" style={{ left: `${r()[0]}px`, width: `${r()[1]}px`, height: `${BARS_H}px` }} />}</Show>
+      <Show when={brush()}>{(r) => <div class="lhist-brush" style={{ left: `${r()[0]}px`, width: `${r()[1]}px`, height: `${BARS_H}px` }} />}</Show>
       <Show when={tip()}>
         {(t) => {
           // At the pointer, to its right on the left of the strip and to its left on the right: always inside it.
-          const at = () => Math.max(0, Math.min(1, t().x / (w() || 1))) * 100;
+          const at = () => Math.max(0, Math.min(1, t().x / w())) * 100;
           return (
             <div class="lhist-tip" style={{ left: `${at()}%`, transform: `translateX(-${at()}%)` }}>
               {t().text}
@@ -511,4 +489,12 @@ function Bars(props: { ctx: LogCtx; lines: () => Line[] }) {
       </Show>
     </div>
   );
+}
+
+/** A bar's lines by level ("120 info, 3 errors"), or "nothing". */
+function levelsIn(h: Histogram, b: number): string {
+  const k = b - h.lo;
+  const at = (l: Level) => (k >= 0 && k < h.n ? h.counts[k * LEVEL_SLOTS + l] : 0);
+  const parts = STACK.filter((l) => at(l) > 0).map((l) => `${count(at(l))} ${plural(l, at(l))}`);
+  return parts.length ? parts.join(", ") : "nothing";
 }

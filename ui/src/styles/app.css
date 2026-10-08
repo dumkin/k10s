@@ -1351,13 +1351,14 @@ textarea::placeholder {
 .range-chip .x { display: inline-flex; padding: 1px; border-radius: 3px; color: var(--text-3); }
 .range-chip .x:hover { color: var(--text); background: var(--bg-active); }
 .lstrip-state { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 55%; color: var(--text-2); }
-.lhist { position: relative; height: 46px; margin: 0 10px 6px; cursor: crosshair; }
+.lhist { position: relative; margin: 0 10px 6px; cursor: crosshair; }
 .lhist canvas { display: block; }
-/* Over the bars, not the ticks under them (14px, see LogStrip's BARS_H). Where the screen is: a tint over the bars and a
-   line under them. */
-.lhist-seen { position: absolute; top: 0; bottom: 14px; background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 90%, transparent); pointer-events: none; }
-.lhist-hover { position: absolute; top: 0; bottom: 14px; background: var(--bg-active); pointer-events: none; }
-.lhist-brush { position: absolute; top: 0; bottom: 14px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); border-radius: 2px; pointer-events: none; }
+/* Marks over the bars, as high as they are (LogStrip sets it), not over the ticks under them. Where the screen is: a
+   tint over the bars and a line under them; the bar under the pointer; the bars a drag goes over. */
+.lhist-seen, .lhist-hover, .lhist-brush { position: absolute; top: 0; pointer-events: none; }
+.lhist-seen { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 90%, transparent); }
+.lhist-hover { background: var(--bg-active); }
+.lhist-brush { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); border-radius: 2px; }
 .lhist-tip {
   position: absolute;
   top: -26px;

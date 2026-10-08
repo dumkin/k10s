@@ -170,6 +170,11 @@ export class LogBuffer {
   private changes = 0;
   /** Kept entries that went so far (beyond their share of the budget). */
   private forgotten = 0;
+  /** The kept entries' time (see `extent`), as of the first of them and how many there were. */
+  private keptTime: { first: Line | undefined; n: number; span: readonly [number, number] | null } | null = null;
+  /** A paused view's newest entry (see `extent`), as of the arrivals it shows. */
+  private endBy: { upTo: number; line: Line | null } | null = null;
+
 
   constructor(
     readonly maxBytes = MAX_BYTES,
@@ -209,6 +214,8 @@ export class LogBuffer {
    */
   addEarlier(batch: LogLine[], markers: readonly EarlierMarker[] = []) {
     if ((!batch.length && !markers.length) || this.dropped > 0) return;
+    // (Earlier lines are no arrivals: a paused view shows them, its newest entry may be one of them.)
+    this.endBy = null;
     const incoming: Line[] = [];
     const last = new Map<number, Line>();
     const lastTs = new Map<number, number | null>();
@@ -403,6 +410,68 @@ export class LogBuffer {
     }
   }
 
+  /**
+   * The time its entries cover: from the first that has a time to the newest that is no marker (markers are placed by
+   * this computer's clock, which may run ahead of the cluster's). `withKept`: the kept entries' too, which are in the
+   * order they were dropped in, not always in their time's. `upTo` (a paused view's last arrival, see `Line.seq`): up
+   * to the newest entry that came by then — what came since waits. Null when there is no such entry.
+   */
+  extent(withKept: boolean, upTo: number | null): readonly [number, number] | null {
+    const lines = this.lines;
+    // (Lines without a time, before any that has one, have key 0: they come first.)
+    const from = indexAtKey(lines, 1);
+    let lo = from < lines.length ? lines[from].key : Infinity;
+    let hi = -Infinity;
+    if (upTo === null) {
+      for (let k = lines.length - 1; k >= from; k--)
+        if (!lines[k].marker) {
+          hi = lines[k].key;
+          break;
+        }
+    } else hi = this.newestBy(upTo)?.key ?? -Infinity;
+    if (withKept && this.kept.length) {
+      const k = this.keptSpan();
+      if (k) {
+        lo = Math.min(lo, k[0]);
+        hi = Math.max(hi, k[1]);
+      }
+    }
+    return lo <= hi ? [lo, hi] : null;
+  }
+
+  /** The newest entry that came by `upTo` (its `seq`), markers aside: worked out once per pause. */
+  private newestBy(upTo: number): Line | null {
+    const c = this.endBy;
+    if (c && c.upTo === upTo && (!c.line || c.line.pos >= this.dropped)) return c.line;
+    let line: Line | null = null;
+    for (let k = this.lines.length - 1; k >= 0; k--) {
+      const l = this.lines[k];
+      if (!l.marker && l.key >= 1 && l.seq <= upTo) {
+        line = l;
+        break;
+      }
+    }
+    this.endBy = { upTo, line };
+    return line;
+  }
+
+  /** The time of the kept entries (in any order), worked out again when they changed. */
+  private keptSpan(): readonly [number, number] | null {
+    const kept = this.kept;
+    const c = this.keptTime;
+    if (c && c.first === kept[0] && c.n === kept.length) return c.span;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const l of kept)
+      if (!l.marker && l.key >= 1) {
+        if (l.key < lo) lo = l.key;
+        if (l.key > hi) hi = l.key;
+      }
+    const span = lo <= hi ? ([lo, hi] as const) : null;
+    this.keptTime = { first: kept[0], n: kept.length, span };
+    return span;
+  }
+
   /** The entry's plain text in lower case (kept once made; it counts towards the budget). */
   lower(l: Line): string {
     if (l.lower === undefined) {
@@ -509,6 +578,8 @@ export class LogBuffer {
     this.lastEntry.clear();
     this.lastTs.clear();
     this.views.clear();
+    this.keptTime = null;
+    this.endBy = null;
   }
 }
 

@@ -184,8 +184,6 @@ export interface LogCtx {
   /** Keys of the first and last line on screen (the histogram shows where they are). */
   onScreen: Accessor<readonly [number, number] | null>;
   setOnScreen: (r: readonly [number, number] | null) => void;
-  /** Scrolls a line into view (set by the lines). */
-  reveal: (l: Line) => void;
   copyLines: (lines: readonly Line[], as: "text" | "jsonl") => void;
   summary: Accessor<Summary>;
   selectionCount: Accessor<{ pods: number; total: number; targets: number }>;
@@ -921,7 +919,6 @@ export function LogViewer(props: LogViewerProps) {
     },
     onScreen,
     setOnScreen,
-    reveal: (l) => lines?.reveal(l),
     copyLines,
     summary,
     selectionCount: () => ({ pods: selection().pods, total: selection().total, targets: selection().targets.length }),

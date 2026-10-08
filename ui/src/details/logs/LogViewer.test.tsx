@@ -7,6 +7,7 @@ import type { DetailProps } from "../../registry/details";
 import { setToasts, toasts } from "../../state/ui";
 import type { UIRow } from "../../state/view";
 import { LogsTab } from "../LogsTab";
+import { hover } from "./LogStrip";
 import { budget, timing } from "./LogViewer";
 import { setFilterMode, setFold, setPinned, setPretty, setUtc } from "./model";
 
@@ -939,13 +940,21 @@ describe("log histogram", () => {
   /** Lines counted again (a pass, every 250 ms at most). */
   const pass = () => new Promise((r) => setTimeout(r, 300));
   const frame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)));
-  /** The strip, laid out 600 px wide at the window's left edge: 120 bars of 5 px. */
-  const strip = (root: HTMLElement) => {
-    const box = root.querySelector<HTMLElement>(".lhist")!;
-    Object.defineProperty(box, "clientWidth", { configurable: true, value: 600 });
-    box.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 46, width: 600, height: 46, x: 0, y: 0, toJSON: () => ({}) });
+  /** The strip laid out `w` px wide at the window's left edge (bars of 5 px: 120 at 600 px). */
+  const widen = (box: HTMLElement, w: number) => {
+    Object.defineProperty(box, "clientWidth", { configurable: true, value: w });
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, right: w, bottom: 46, width: w, height: 46, x: 0, y: 0, toJSON: () => ({}) });
     resize(box, 46);
+  };
+  const strip = (root: HTMLElement, w = 600) => {
+    const box = root.querySelector<HTMLElement>(".lhist")!;
+    widen(box, w);
     return box;
+  };
+  /** The log view laid out `h` high (0: a dock tab not shown). */
+  const tall = (view: HTMLElement, h: number) => {
+    Object.defineProperty(view, "clientHeight", { configurable: true, value: h });
+    resize(view, h);
   };
   /** The pointer at x (moves say no button is held, as events handed to WebKit by software do). */
   const point = async (box: HTMLElement, type: string, x: number) => {
@@ -955,6 +964,11 @@ describe("log histogram", () => {
   const click = async (box: HTMLElement, x: number) => {
     await point(box, "pointerdown", x);
     await point(box, "pointerup", x);
+  };
+  const drag = async (box: HTMLElement, from: number, to: number) => {
+    await point(box, "pointerdown", from);
+    await point(box, "pointermove", to);
+    await point(box, "pointerup", to);
   };
   const tip = (root: HTMLElement) => root.querySelector(".lhist-tip")?.textContent;
   const selected = (root: HTMLElement) => root.querySelector(".lines .ln.sel .txt")?.textContent;
@@ -1020,6 +1034,124 @@ describe("log histogram", () => {
     await pass();
     await point(box, "pointerenter", 202);
     expect(tip(root)).toBe("00:10:23–00:10:24 · 1 info");
+  });
+
+  it("takes a drag back on Escape and leaves what Escape does elsewhere alone: the line picked stays", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k)) });
+    await pass();
+    const box = strip(root);
+    await point(box, "pointerenter", 202);
+    await click(box, 202);
+    expect(selected(root)).toBe("INFO line 20");
+    await point(box, "pointerdown", 202);
+    await point(box, "pointermove", 252);
+    const lines = root.querySelector<HTMLElement>(".code.logs")!;
+    lines.focus();
+    lines.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await frame();
+    expect([root.querySelector(".lhist-brush"), selected(root)]).toEqual([null, "INFO line 20"]);
+    // The release that follows ends no drag: nothing is picked.
+    await point(box, "pointerup", 252);
+    expect(root.querySelector(".range-chip")).toBeNull();
+  });
+
+  it("stops while paused, shown again and filtered meanwhile: its bars end with the lines shown", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k, `${k % 2 ? "WARN" : "INFO"} line ${k}`)) });
+    await pass();
+    await key(root, "s");
+    // 5 minutes of lines, which wait while paused.
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k): [number, number, string] => [0, 700_000 + k * 3000, `INFO later ${k}`]) });
+    await pass();
+    // Hidden and shown again (as a dock tab is), then a level hidden.
+    await key(root, "h");
+    await key(root, "h");
+    root.querySelector<HTMLButtonElement>(".lchip")!.click();
+    await pass();
+    const box = strip(root);
+    await point(box, "pointerenter", 597);
+    expect(tip(root)).toBe("00:11:39–00:11:40 · 1 warning");
+  });
+
+  it("keeps its step while hidden: shown again, its bars are as they were", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 131 }, (_, k) => second(k)) });
+    await pass();
+    // 600 px: bars of 2 s. At 700 px a second would do, but not with room to spare: 2 s stay.
+    const box = strip(root);
+    widen(box, 700);
+    await point(box, "pointerenter", 202);
+    expect(tip(root)).toBe("00:08:52–00:08:54 · nothing");
+    await point(box, "pointerleave", 202);
+    // A dock tab not shown is 0 high: the bars go, then come back.
+    const view = root.querySelector<HTMLElement>(".logv")!;
+    tall(view, 0);
+    expect(root.querySelector(".lhist")).toBeNull();
+    tall(view, 500);
+    await point(strip(root, 700), "pointerenter", 202);
+    expect(tip(root)).toBe("00:08:52–00:08:54 · nothing");
+  });
+
+  it("moves on as lines come that the filters leave out: they lower the bars, they do not hold them", async () => {
+    const { root, s } = await mount();
+    s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k, `INFO alpha ${k}`)) });
+    await pass();
+    await query(root, "alpha");
+    s.send({ t: "lines", l: Array.from({ length: 10 }, (_, k) => second(100 + k, `INFO beta ${k}`)) });
+    await pass();
+    await point(strip(root), "pointerenter", 597);
+    expect(tip(root)).toBe("00:11:49–00:11:50 · nothing");
+  });
+
+  it("keeps a range, its own, for a click on a bar of lines kept for a filter: without one they are not shown", async () => {
+    const was = { ...budget };
+    budget.lines = 50;
+    try {
+      const { root, s } = await mount();
+      s.send({ t: "lines", l: Array.from({ length: 40 }, (_, k) => second(k, `INFO a ${k}`)) });
+      await pass();
+      // 00:10:05 … 00:10:16 picked; then the oldest lines go, those it shows are kept.
+      let box = strip(root);
+      await point(box, "pointerenter", 427);
+      await drag(box, 427, 482);
+      expect(root.querySelector(".range-chip")!.textContent).toContain("00:10:05 – 00:10:17");
+      await point(box, "pointerleave", 482);
+      s.send({ t: "lines", l: Array.from({ length: 40 }, (_, k) => second(40 + k, `INFO b ${k}`)) });
+      await pass();
+      // Another stretch picked, among the newest lines; then a click on 00:10:10, one of the kept, outside it.
+      box = strip(root);
+      await point(box, "pointerenter", 527);
+      await drag(box, 527, 557);
+      expect(root.querySelector(".range-chip")!.textContent).toContain("00:11:05 – 00:11:12");
+      await click(box, 252);
+      expect([root.querySelector(".range-chip")!.textContent, selected(root)]).toEqual([expect.stringContaining("00:10:10 – 00:10:11"), "INFO a 10"]);
+    } finally {
+      Object.assign(budget, was);
+    }
+  });
+
+  it("lets the bars go on once the pointer rests on them a while; held, the screen's place stays on them", async () => {
+    const was = hover.holdMs;
+    try {
+      const { root, s } = await mount();
+      s.send({ t: "lines", l: Array.from({ length: 100 }, (_, k) => second(k)) });
+      await pass();
+      const box = strip(root);
+      await point(box, "pointerenter", 597);
+      s.send({ t: "lines", l: Array.from({ length: 31 }, (_, k) => second(100 + k)) });
+      await pass();
+      // Held: the newest bars wait. The screen follows the lines past the right edge: its place shows at that edge.
+      expect(tip(root)).toBe("00:11:39–00:11:40 · 1 info");
+      expect(root.querySelector<HTMLElement>(".lhist-seen")!.style.left).toBe("598px");
+      // Once the pointer rests a while (not being read), the bars go on: the newest is under it (bars of 2 s now).
+      hover.holdMs = 50;
+      await point(box, "pointermove", 597);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(tip(root)).toBe("00:12:10–00:12:12 · 1 info");
+    } finally {
+      hover.holdMs = was;
+    }
   });
 
   it("shows all the time again for a click on a bar left out of the time picked; an empty bar goes to the nearest line", async () => {
