@@ -94,7 +94,7 @@ After that, every published release opens a pull request to winget-pkgs.
 
 ## Releasing a version
 
-First bring the docs up to date with the version: the README and its Russian twin, the comparison table, screenshots, the keyboard and architecture docs, and the release notes in `.github/release-notes.md`. With Claude Code, the `prepare-release` skill (`.claude/skills/prepare-release/SKILL.md`) walks through all of it. Either way, `node scripts/release-check.mjs 0.2.0` catches what can be checked mechanically: versions, the platform list, placeholders, README parity, the comparison table's date, the app size, broken links, unused images, secrets and email addresses.
+First bring the docs up to date with the version: the README and its Russian twin, the comparison table, screenshots (and their [JPEG copies](#linux-metadata)), the keyboard and architecture docs, and the release notes in `.github/release-notes.md`. With Claude Code, the `prepare-release` skill (`.claude/skills/prepare-release/SKILL.md`) walks through all of it. Either way, `node scripts/release-check.mjs 0.2.0` catches what can be checked mechanically: versions, the platform list, placeholders, README parity, the comparison table's date, the app size, broken links, unused images, the screenshots of the Linux metadata, secrets and email addresses.
 
 Then:
 
@@ -107,11 +107,20 @@ git push origin main v0.2.0
 
 If the files already have the version (as for the first release, 0.1.0), skip `version.mjs` and the commit.
 
-`scripts/version.mjs` sets the version in `ui/package.json`, `ui/package-lock.json`, `Cargo.toml`, `Cargo.lock` and `crates/k10s-app/tauri.conf.json`; `--check` tells whether they agree.
+`scripts/version.mjs` sets the version in `ui/package.json`, `ui/package-lock.json`, `Cargo.toml`, `Cargo.lock` and `crates/k10s-app/tauri.conf.json`, and adds it to the [Linux metadata](#linux-metadata); `--check` tells whether they agree.
 
 Then watch the Release workflow, open the draft, check the notes and the files, and publish.
 
 **When something fails:** re-run the failed jobs; the draft is reused, and the feed check runs again at the end. To start over, delete the draft release and the tag, fix, and tag again.
+
+## Linux metadata
+
+Linux software centers and the [AppImage catalog](https://appimage.github.io) take the name, summary, description, screenshots and releases of k10s from its AppStream metadata, `packaging/linux/io.dumkin.k10s.appdata.xml`. The deb, rpm and AppImage install it in `/usr/share/metainfo` (`bundle.linux` in `tauri.conf.json`), next to the desktop file Tauri makes, `k10s.desktop`.
+
+- **Releases.** `version.mjs` puts each version on top of `<releases>`, dated the day it runs. A pre-release goes in as a development release and leaves when its version comes out: AppStream sorts `0.2.0-beta.1` above `0.2.0`. `version.mjs --check` fails while the newest release there isn't the version, and so does the Release workflow.
+- **Screenshots.** The README's are lossless WebP of the mock UI (`npm --prefix ui run dev`) in WebKit at 1440×900, 2x; no PNG is kept, the WebP has the same pixels. AppStream takes only PNG and JPEG, so the metadata shows half-size JPEG copies, `docs/assets/*.jpg`. Their addresses name the version's tag (`…/dumkin/k10s/v0.2.0/docs/assets/…`), which `version.mjs` sets: a release shows its own screenshots, and they stay as they were when the README's change. When a README screenshot changes, make its copy again, without subsampling the colors of the text: `sips -Z 1440 -s format tga docs/assets/compare.webp --out /tmp/compare.tga && cjpeg -targa -quality 90 -sample 1x1 -optimize -progressive -outfile docs/assets/compare.jpg /tmp/compare.tga` (`cjpeg` from Homebrew's jpeg-turbo). `release-check.mjs` warns about a copy older than its screenshot.
+- **The name.** `.appdata.xml` is the older of the two names AppStream reads; `.metainfo.xml` is the newer. The AppImage catalog takes the summary and the description only from an `.appdata.xml` file; from a `.metainfo.xml` one it would take just the screenshot and the license.
+- **The catalog** reads the file when it tests the AppImage of the latest release. After a release that changes it, comment `/retest` on k10s's pull request there.
 
 ## Third-party licenses
 

@@ -10,8 +10,11 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+/** The AppStream metadata of the Linux packages: it lists every version, newest first. */
+const METAINFO = "packaging/linux/io.dumkin.k10s.appdata.xml";
 
-/** Where the version is: a file and the pattern around it (the version is the second group). */
+/** Where the version is: a file, the pattern around it (the version is the second group; a global pattern finds all of
+ * them) and, when the file name doesn't say, what it is. */
 const PLACES = [
   ["ui/package.json", /^(\{[\s\S]*?\n  "version": ")([^"]+)(")/],
   ["ui/package-lock.json", /^(\{[\s\S]*?\n  "version": ")([^"]+)(")/],
@@ -20,16 +23,33 @@ const PLACES = [
   ["Cargo.lock", /(\nname = "k10s"\nversion = ")([^"]+)(")/],
   ["Cargo.lock", /(\nname = "k10s-core"\nversion = ")([^"]+)(")/],
   ["crates/k10s-app/tauri.conf.json", /^(\{[\s\S]*?\n  "version": ")([^"]+)(")/],
+  // The screenshots of the version's tag: those of a released version stay as they were.
+  [METAINFO, /(https:\/\/raw\.githubusercontent\.com\/dumkin\/k10s\/v)([^/]+)(\/)/g, "screenshots"],
 ];
 
 const read = (file) => readFileSync(join(ROOT, file), "utf8");
 
 function found() {
-  return PLACES.map(([file, pattern]) => {
-    const m = read(file).match(pattern);
-    if (!m) throw new Error(`no version found in ${file}`);
-    return { file, version: m[2] };
+  const places = PLACES.flatMap(([file, pattern, what]) => {
+    const matches = pattern.global ? [...read(file).matchAll(pattern)] : [read(file).match(pattern)].filter(Boolean);
+    if (!matches.length) throw new Error(`no version found in ${file}`);
+    return [...new Set(matches.map((m) => m[2]))].map((version) => ({ file: what ? `${file}, ${what}` : file, version }));
   });
+  const newest = read(METAINFO).match(/<release version="([^"]+)"/);
+  if (!newest) throw new Error(`no release found in ${METAINFO}`);
+  return [...places, { file: `${METAINFO}, newest release`, version: newest[1] }];
+}
+
+/** Puts the version on top of the releases in the AppStream metadata, dated today. A pre-release goes in as a
+ * development release and leaves when its version comes out, since AppStream sorts 0.2.0-beta.1 above 0.2.0. */
+function addRelease(version) {
+  const text = read(METAINFO);
+  if (text.includes(`<release version="${version}"`)) return;
+  const date = new Date().toISOString().slice(0, 10);
+  const type = version.includes("-") ? ' type="development"' : "";
+  const prereleases = new RegExp(`\\n *<release version="${version.replaceAll(".", "\\.")}-[^"]*"[^>]*/>`, "g");
+  const releases = /(\n( *)<releases>\n)/;
+  writeFileSync(join(ROOT, METAINFO), text.replace(prereleases, "").replace(releases, `$1$2  <release version="${version}" date="${date}"${type}/>\n`));
 }
 
 const args = process.argv.slice(2);
@@ -46,6 +66,7 @@ if (args[0] === "--check") {
   console.log(`Version ${[...versions][0]} everywhere.`);
 } else if (args.length === 1 && SEMVER.test(args[0].replace(/^v/, ""))) {
   const version = args[0].replace(/^v/, "");
+  addRelease(version);
   for (const [file, pattern] of PLACES) writeFileSync(join(ROOT, file), read(file).replace(pattern, `$1${version}$3`));
   console.log(`Version ${version} set in ${[...new Set(PLACES.map(([f]) => f))].join(", ")}.`);
 } else {

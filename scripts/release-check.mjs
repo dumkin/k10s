@@ -118,11 +118,23 @@ for (const file of tracked.filter((f) => f.endsWith(".md"))) {
   }
 }
 
+// The AppStream metadata of the Linux packages. Its releases and the tag of its screenshots are checked with the version.
+const METAINFO = "packaging/linux/io.dumkin.k10s.appdata.xml";
+
 // Screenshots nobody shows.
 for (const asset of readdirSync(join(ROOT, "docs/assets"))) {
   // From the repository root (docs/assets/x) or from a document in docs/ (assets/x).
   const used = (f) => read(f).includes(`docs/assets/${asset}`) || (f.startsWith("docs/") && read(f).includes(`assets/${asset}`));
-  if (!tracked.some((f) => f.endsWith(".md") && used(f))) warnings.push(`docs/assets/${asset} is not used by any document`);
+  if (!tracked.some((f) => (f.endsWith(".md") || f === METAINFO) && used(f))) warnings.push(`docs/assets/${asset} is not used by any document`);
+}
+
+// Software centers show the screenshots of the AppStream metadata from the version's tag, so they must be in the
+// repository: JPEG copies of the README's screenshots, made again whenever those change.
+const committed = (file) => Number(execFileSync("git", ["log", "-1", "--format=%ct", "--", file], { cwd: ROOT }).toString().trim() || Infinity);
+for (const [, image] of read(METAINFO).matchAll(/<image[^>]*>https:\/\/raw\.githubusercontent\.com\/dumkin\/k10s\/[^/]+\/([^<]+)<\/image>/g)) {
+  const webp = image.replace(/\.jpg$/, ".webp");
+  if (!existsSync(join(ROOT, image))) errors.push(`${METAINFO} shows ${image}, which isn't in the repository`);
+  else if (existsSync(join(ROOT, webp)) && committed(webp) > committed(image)) warnings.push(`${image} is older than ${webp}: make it again (docs/releasing.md)`);
 }
 
 // Secrets and personal data that must never ship.
