@@ -172,7 +172,7 @@ describe("going back to a row that isn't loaded yet", () => {
     // Room for 10 rows under the header; jsdom does no layout.
     let top = 0;
     Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 31 + 10 * 28 });
-    Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => top, set: (v: number) => { top = v; } });
 
     nav.setSelectedKey("z1/pod-80");
     await Promise.resolve();

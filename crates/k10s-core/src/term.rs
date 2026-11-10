@@ -9,9 +9,9 @@
 //!
 //! Entering a container is a change like any other (a shell can change anything in it): refused in read-only
 //! mode — when the session starts and again right before its stream opens — and journalled (`k10s::audit`:
-//! where, and how it went; never what was typed). Before the stream opens, the pod is looked at: kube does
-//! not pass on why the API server refused to open it, while the container's state says it plainly (not
-//! running, crash-looping, no such container…). Containers created for the session are waited for while they
+//! where, and how it went; never what was typed). Before the stream opens, the pod is looked at: the
+//! container's state says plainly why it cannot run (not running, crash-looping, no such container…).
+//! Containers created for the session are waited for while they
 //! start (pulling their image), up to [`WAIT_FOR_RUNNING`].
 //!
 //! Output is flow-controlled: the UI acknowledges what its terminal has drawn, and reading stops while more
@@ -462,7 +462,7 @@ async fn open(inner: &Arc<Inner>, cluster: &Cluster, api: &Api<Pod>, e: &Entry, 
     }
 }
 
-/// The status code the API server answered the stream's opening with (kube keeps nothing else of it).
+/// The status code the API server answered the stream's opening with, including older upgrade errors.
 fn switch_code(err: &Error) -> Option<u16> {
     match err {
         Error::Kube(kube::Error::UpgradeConnection(kube::client::UpgradeConnectionError::ProtocolSwitch(code))) => Some(code.as_u16()),
@@ -474,8 +474,7 @@ fn rejected(err: &Error) -> bool {
     switch_code(err) == Some(401) || matches!(err, Error::Kube(e) if crate::cluster::is_auth_failure(e))
 }
 
-/// Why the stream did not open, in words: the API server's answer itself is lost on the way (kube keeps only
-/// its status code), but the container was found running a moment ago, which leaves few explanations.
+/// Why the stream did not open, in words, after the container was found running a moment ago.
 fn open_failure(err: &Error, e: &Entry, verb: &str) -> String {
     let ns = e.pod.namespace.as_deref().unwrap_or_default();
     let sub = if e.how == How::Attach { "attach" } else { "exec" };
@@ -714,6 +713,25 @@ mod tests {
             "spec": { "containers": [{ "name": "app" }, { "name": "sidecar" }], "ephemeralContainers": [{ "name": "debugger-x" }] },
             "status": status,
         })
+    }
+
+    #[tokio::test]
+    async fn rejected_streams_keep_their_status_and_only_unauthorized_ones_renew_credentials() {
+        let entry = Entry { pod: pod_ref("c", "default", "web-1", None), container: "app".into(), how: How::Shell, starting: false };
+        for (code, message) in [
+            (401, "credentials rejected: reconnect the cluster and try again"),
+            (403, "no permission to open a terminal in namespace \"default\": it takes create on pods/exec"),
+            (404, "pod \"web-1\" not found: it was deleted"),
+            (503, "the API server could not reach the node's kubelet (HTTP 503)"),
+        ] {
+            let api: Api<Pod> = Api::namespaced(crate::error::tests::rejecting_client(code), "default");
+            let err = Error::from(api.exec("web-1", ["sh"], &AttachParams::interactive_tty()).await.err().expect("the upgrade is rejected"));
+            assert!(matches!(&err, Error::Kube(kube::Error::Api(_))), "{err:?}");
+            assert_eq!(switch_code(&err), Some(code));
+            assert_eq!(rejected(&err), code == 401, "HTTP {code}");
+            assert_eq!(open_failure(&err, &entry, "create"), message);
+        }
+        assert!(rejected(&Error::from(kube::Error::Auth(crate::error::tests::exec_failure()))));
     }
 
     #[test]

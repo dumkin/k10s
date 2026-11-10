@@ -15,7 +15,7 @@ Contributions are accepted under the [Contributor License Agreement](CLA.md). On
 
 You need:
 
-- **Rust**, stable (1.90 or newer): [rustup.rs](https://rustup.rs);
+- **Rust**, stable (1.95 or newer): [rustup.rs](https://rustup.rs);
 - **Node.js** 24.15 or newer in the 24 line (what CI uses; `.nvmrc` says so), or 22.22.2 or newer in the 22 line;
 - the platform's build tools:
   - macOS: Xcode Command Line Tools (`xcode-select --install`);

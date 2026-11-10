@@ -295,7 +295,7 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    /// Exactly what kube 4.2 reports for a failed plugin run (`AuthError::AuthExecRun`'s display).
+    /// Exactly what kube reports for a failed plugin run (`AuthError::AuthExecRun`'s display).
     fn exec_failure_text(cmd: &Command, script: &str) -> String {
         let out = Command::new("sh").args(["-c", script]).output().unwrap();
         format!("auth exec command '{cmd:?}' failed with status {}: {out:?}", out.status)
@@ -382,7 +382,7 @@ mod tests {
             let clean = sanitize_error_text(text);
             assert!(!clean.contains("SECRET") && clean.contains("(details withheld)"), "{clean}");
         }
-        let debug = r#"Auth(AuthExecRun { cmd: "API_TOKEN=\"SECRET123\" \"kubelogin\"", status: ExitStatus(unix_wait_status(256)), out: Output { status: ExitStatus(unix_wait_status(256)), stdout: "", stderr: "" } })"#;
+        let debug = r#"Auth(AuthExecRun { cmd: "API_TOKEN=\"SECRET123\" \"kubelogin\"", out: Output { status: ExitStatus(unix_wait_status(256)), stdout: "", stderr: "" } })"#;
         assert_eq!(sanitize_error_text(debug), "Auth(AuthExecRun { … }");
     }
 

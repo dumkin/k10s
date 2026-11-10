@@ -279,7 +279,7 @@ describe("DetailsPanel", () => {
     const body = panel.querySelector<HTMLElement>(".d-body")!;
     let top = 0;
     Object.defineProperties(body, {
-      scrollTop: { configurable: true, get: () => top, set: (v: number) => (top = Math.max(0, Math.min(700, v))) },
+      scrollTop: { configurable: true, get: () => top, set: (v: number) => { top = Math.max(0, Math.min(700, v)); } },
       scrollHeight: { configurable: true, value: 1000 },
       clientHeight: { configurable: true, value: 300 },
     });

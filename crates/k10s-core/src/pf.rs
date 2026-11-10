@@ -493,7 +493,7 @@ async fn forward_one(inner: &Arc<Inner>, fwd: &Forward, mut tcp: Counted) -> Res
     }
 }
 
-/// The status code the API server answered the stream's opening with (kube keeps nothing else of it).
+/// The status code the API server answered the stream's opening with, including older upgrade errors.
 fn upgrade_code(err: &Error) -> Option<u16> {
     match err {
         Error::Kube(kube::Error::UpgradeConnection(kube::client::UpgradeConnectionError::ProtocolSwitch(code))) => Some(code.as_u16()),
@@ -566,6 +566,23 @@ mod tests {
 
     fn labels(m: &[(&str, &str)]) -> BTreeMap<String, String> {
         m.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[tokio::test]
+    async fn rejected_portforward_streams_keep_the_status_used_for_reconnects_and_diagnostics() {
+        for (code, message) in [
+            (401, "credentials rejected: reconnect the cluster"),
+            (403, "no permission to port-forward in namespace \"default\": it takes create on pods/portforward"),
+            (404, "pod \"web-1\" not found"),
+            (400, "pod \"web-1\" is not running"),
+            (503, "the API server could not reach the node's kubelet (HTTP 503)"),
+        ] {
+            let api: Api<Pod> = Api::namespaced(crate::error::tests::rejecting_client(code), "default");
+            let err = Error::from(api.portforward("web-1", &[8080]).await.err().expect("the upgrade is rejected"));
+            assert!(matches!(&err, Error::Kube(kube::Error::Api(_))), "{err:?}");
+            assert_eq!(upgrade_code(&err), Some(code));
+            assert_eq!(open_failure(&err, upgrade_code(&err), "web-1", "default", "create"), message);
+        }
     }
 
     #[test]

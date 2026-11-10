@@ -134,7 +134,7 @@ pub(crate) mod tests {
     use super::*;
     use std::process::Command;
 
-    /// A real exec auth failure, built the way kube 4.2 builds it.
+    /// A real exec auth failure, built the way kube builds it.
     pub(crate) fn exec_failure() -> kube::client::AuthError {
         let mut cmd = Command::new("kubelogin");
         cmd.args(["get-token"]).envs([
@@ -143,10 +143,27 @@ pub(crate) mod tests {
             ("KUBERNETES_EXEC_INFO", r#"{"apiVersion":"client.authentication.k8s.io/v1"}"#),
         ]);
         let out = Command::new("sh").args(["-c", "echo please sign in again >&2; echo partial-token; exit 1"]).output().unwrap();
-        kube::client::AuthError::AuthExecRun { cmd: format!("{cmd:?}"), status: out.status, out }
+        kube::client::AuthError::AuthExecRun { cmd: format!("{cmd:?}"), out: Box::new(out) }
     }
 
     pub(crate) const EXEC_FAILURE: &str = "exec auth plugin `kubelogin get-token` failed (exit status: 1): please sign in again";
+
+    /// A fake API server rejecting websocket upgrades with a Kubernetes Status response.
+    pub(crate) fn rejecting_client(code: u16) -> kube::Client {
+        let svc = tower::service_fn(move |_req: http::Request<kube::client::Body>| async move {
+            let body = serde_json::json!({
+                "apiVersion": "v1", "kind": "Status", "status": "Failure", "code": code, "message": "stream refused",
+            });
+            Ok::<_, std::convert::Infallible>(
+                http::Response::builder()
+                    .status(code)
+                    .header("content-type", "application/json")
+                    .body(kube::client::Body::from(body.to_string().into_bytes()))
+                    .unwrap(),
+            )
+        });
+        kube::Client::new(svc, "default")
+    }
 
     fn assert_clean(text: &str) {
         for secret in ["SECRET123", "partial-token", "/usr/bin", "client.authentication.k8s.io"] {

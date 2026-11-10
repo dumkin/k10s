@@ -27,7 +27,7 @@ tauri = { workspace = true, features = ["devtools"] }
 tauri-plugin-window-state.workspace = true
 # Native confirmation before read-only mode is turned off (used from Rust only: the web view gets no
 # permission for it, so nothing in it can answer the dialog).
-tauri-plugin-dialog = "2.8"
+tauri-plugin-dialog = "2.8.4"
 # Updates from GitHub Releases, checked and installed from Rust only (no permission for the web view).
 tauri-plugin-updater.workspace = true
 tokio.workspace = true

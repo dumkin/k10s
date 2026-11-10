@@ -915,7 +915,7 @@ describe("log view under a flood of lines", () => {
     expect(root.querySelector(".follow-btn")).not.toBeNull();
     const writes: number[] = [];
     const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop")!;
-    Object.defineProperty(el, "scrollTop", { configurable: true, get: () => desc.get!.call(el), set: (v: number) => (writes.push(v), desc.set!.call(el, v)) });
+    Object.defineProperty(el, "scrollTop", { configurable: true, get: () => desc.get!.call(el), set: (v: number) => { writes.push(v); desc.set!.call(el, v); } });
     // On to 2300 (no scroll event yet), then lines at the end: nothing scrolls the view back.
     el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true }));
     desc.set!.call(el, 2300);
