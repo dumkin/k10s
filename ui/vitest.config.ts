@@ -8,6 +8,7 @@ export default mergeConfig(
     resolve: { conditions: ["development", "browser"] },
     test: {
       environment: "jsdom",
+      pool: "vmThreads",
       include: ["src/**/*.test.{ts,tsx}"],
       setupFiles: ["src/test/setup.ts"],
     },

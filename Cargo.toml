@@ -9,7 +9,6 @@ rust-version = "1.95"
 license = "AGPL-3.0-only"
 authors = ["Danil Dumkin"]
 repository = "https://github.com/dumkin/k10s"
-homepage = "https://github.com/dumkin/k10s"
 publish = false
 
 [workspace.dependencies]

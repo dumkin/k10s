@@ -511,9 +511,7 @@ pub enum ProjectPage {
     Releases,
 }
 
-/// The project's repository: the crate's `homepage` in Cargo.toml. Not `bundle.homepage` of tauri.conf.json:
-/// `generate_context!` leaves that out of the config the app gets at run time (it is always `None` there).
-const HOMEPAGE: &str = env!("CARGO_PKG_HOMEPAGE");
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 
 /// Opens a page of the project in the browser.
 #[tauri::command]
@@ -523,9 +521,9 @@ pub async fn open_project_page(page: ProjectPage) -> Result<()> {
 
 fn project_page_url(page: ProjectPage) -> String {
     match page {
-        ProjectPage::Home => HOMEPAGE.to_owned(),
-        ProjectPage::Issues => format!("{HOMEPAGE}/issues"),
-        ProjectPage::Releases => format!("{HOMEPAGE}/releases"),
+        ProjectPage::Home => REPOSITORY.to_owned(),
+        ProjectPage::Issues => format!("{REPOSITORY}/issues"),
+        ProjectPage::Releases => format!("{REPOSITORY}/releases"),
     }
 }
 
@@ -610,12 +608,12 @@ mod tests {
 
     #[test]
     fn project_pages_are_pages_of_the_repository() {
-        assert!(HOMEPAGE.starts_with("https://github.com/"), "Cargo.toml names no GitHub homepage: {HOMEPAGE:?}");
+        assert!(REPOSITORY.starts_with("https://github.com/"), "Cargo.toml names no GitHub repository: {REPOSITORY:?}");
         // Named as the web view names them (`openProjectPage` in ui/src/lib/backend).
         let url = |page: &str| project_page_url(serde_json::from_value(serde_json::json!(page)).unwrap());
-        assert_eq!(url("home"), HOMEPAGE);
-        assert_eq!(url("issues"), format!("{HOMEPAGE}/issues"));
-        assert_eq!(url("releases"), format!("{HOMEPAGE}/releases"));
+        assert_eq!(url("home"), REPOSITORY);
+        assert_eq!(url("issues"), format!("{REPOSITORY}/issues"));
+        assert_eq!(url("releases"), format!("{REPOSITORY}/releases"));
         assert!(serde_json::from_value::<ProjectPage>(serde_json::json!("https://example.com")).is_err());
     }
 
